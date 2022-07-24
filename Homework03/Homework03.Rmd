@@ -1,0 +1,244 @@
+---
+title: "Homework3"
+author: "Ethan Gutknecht"
+date: "9/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(emmeans) 
+```
+
+```{r}
+caffeine <- read.csv("caffeine.csv")
+head(caffeine)
+```
+
+-------
+
+-------
+
+-------
+
+-------
+
+## Question 1
+ A study was conducted to assess the effect of caffeine on reaction time in subjects under sleep deprivation. Subjects were randomly assigned to receive either caffeine or a placebo (13 subjects per group). In the data set, 1=caffeine and 2=placebo. Then they were subjected to four days of total sleep deprivation (the first day is labeled Day 0, and the last day is labeled Day 4). Each day, their reaction time was measured with seven tests throughout the day. On each test, the researchers recorded the number of psychomotor vigilance performance lapses, defined as the number of times the subjects took longer than 500ms to respond. For each day, they recorded each subject's average lapses across the tests from that day. The tests were performed at the same times each day for each subject. 
+
+#### Part 1
+Identify the following design elements in this study: the experimental units, the response variable(s), the factor, factor levels, the treatments. What did the experimenters do to control variability?
+
+* **Experimental Unit**: *Experimental subjects, assuming humans*
+
+* **Response variable**: *Psychomotor vigilance performance lapses or the number of times the subjects took longer than 500ms to respond.*
+
+* **Factor**: *Days*
+
+* **Factor Levels**: *Four*
+
+* **Treatments**: *Caffeine and Placebo*
+
+* **What did the experimenters do to control variability?**: *They randomly assigned subjects with the treatment and they replicated the experiment under the same conditions many times.*
+
+
+
+#### Part 2
+What type of analysis makes the most sense for this study design? How do the factors in this study fit into this design? Justify your choice.
+
+*We will perform a one way ANOVA test as there is two populations we want to compare, the treatment and the reaction time.*
+
+
+
+#### Part 3
+Perform the following two data cleaning steps:
+a. The data are currently in wide format, but for the analysis, you will need it in long format. Convert the data from wide to tall format. 
+b. Add meaningful labels to the factor levels. Convert any variables to factors if needed.
+```{r}
+# Creates it in tall form
+caffeine <- caffeine %>%
+   pivot_longer(cols=c(Day0, Day1, Day2, Day3), names_to="Day", values_to = "ReactionTime")
+
+# Creates a factor for the treatment
+caffeine <- caffeine %>% mutate(Treatment=factor(Treatment, 1:2, labels=c("Caffeine", "Placebo") ) )
+head(caffeine)
+```
+
+
+
+#### Part 4
+(EDA) Create an appropriate plot for visualizing this data set. You must use meaningful labels in this plot. Describe your observations based on the plot. 
+```{r message=FALSE, warning=FALSE}
+# Create a new data set that will take the mean of the reaction time of the treatment group by the day.
+caffeinemean <- caffeine %>% 
+  group_by(Treatment, Day) %>%
+  summarize(Mean=mean(ReactionTime),
+            SD=sd(ReactionTime),
+            N=n())
+
+# Plot the mean of the experiment grouped by what treatment they were given (caffeine or the placebo) over the four days.
+ggplot(caffeinemean) + 
+  geom_line(aes(x=Day, y=Mean, col=Treatment, group=Treatment)) + 
+  geom_point(aes(x=Day, y=Mean, col=Treatment), size=3) +
+  xlab("Day") +
+  ylab("Mean Of Reaction Time") +
+  theme_bw()
+
+```
+*Based on these results, we can see that over the days of the experiment, the reaction time got slower. We can see that caffeine had an overall better reaction time than the placebo during all four days. This makes sense since naturally when you drink caffeine, you are more alert.*
+
+
+#### Part 5
+Fit the appropriate model for this study. Explain your results, citing the test statistic(s), degrees of freedom, and the p-value(s). What are your conclusions in the context of the problem?
+```{r}
+# Run the one way anova test
+caffeine.analysis <- aov(ReactionTime ~ Treatment, data=caffeine)
+summary(caffeine.analysis)
+
+# Check the assumptions of the data
+autoplot(caffeine.analysis)
+```
+*After checking the assumptions, we find that our data is normal and the Residual and scale location plot is horizontal. After performing our tests, we can see that we got an F-value of 11.85 with 1 and 102 degrees of freedom. We can see that our P-value is less than 0.05 being 0.000838. Thus, there is a difference in reaction time when studying subjects being sleep deprived with caffeine and the placebo. *
+
+*Finally, to answer the question. We can say that we have significant evidence that caffiene will have an effect on reaction time compared to the placebo.*
+
+
+#### Part 6
+Multiple comparisons is not necessary here. This is because we are not testing for the difference between many different factors. We are only testing for the difference between two factors, caffeine and the placebo. Since the last test told us that there is a difference between them, no further tests are needed. 
+
+
+-------
+
+-------
+
+-------
+
+-------
+
+## Question 2
+Golf is one of the most popular recreational sports in the United States. The *driver* is one of the more important clubs as a golfer will use it when wishing to hit the ball off a tee for very long distances. The act of hitting a golf ball requires precision, skill and strength but the club can influence a shot as well. A golf manufacturer is looking to improve their product line of golf drivers.
+There are four prototype drivers:
+
+* Driver 1: mass of 270g and a length of 117.5cm
+* Driver 2: mass of 290g and a length of 116.2cm
+* Driver 3: mass of 310g and a length of 115.0cm
+* Driver 4: mass of 340g and a length of 113.4cm
+
+The manufacturer recruited 6 different golfers to test each of the four drivers. Each golfer used each driver once, in a random order, and the manufacturer recorded several variables related to the shot. Of particular interest to the manufacturer is determining if certain drivers result in longer distance shots.
+
+```{r}
+# Read the data and save it as an object
+golf <- read.csv("golf_driver.csv")
+```
+
+
+
+#### Part 1
+Convert any variables to factors if needed, using meaningful factor labels where possible. 
+```{r}
+# Creates labels for the drivers
+golf <- golf %>% mutate(club=factor(club, 1:4, labels=c("Driver 1", "Driver 2", "Driver 3", "Driver 4")), golfer = as.factor(golfer))
+
+# Turns golfer from an int to a factor
+golf <- golf %>%
+  mutate(golfer = as.factor(golfer))
+
+# Show the first rows of the data to check if changes were made correctly.
+head(golf)
+```
+
+
+
+#### Part 2
+What type of analysis makes the most sense for this study design? How do the factors in this study fit into this design? Justify your choice.
+
+*We will be performing an ANOVA test with blocking. We are doing this because the golfer itself might have some effect swaying the performance of the club. We will be blocking by golfer.*
+
+
+
+#### Part 3
+(EDA) Create an appropriate plot for visualizing this data set. You must use meaningful labels in this plot. Describe your observations based on the plot. 
+```{r}
+# Create a line plot grouping the drivers results by golfer
+ggplot(golf) + 
+  geom_line(aes(x=golfer, y=totdist, col=club, group=club)) + 
+  geom_point(aes(x=golfer, y=totdist, col=club), size=3) +
+  xlab("Golfer") +
+  ylab("Total Distance Of Ball") +
+  theme_bw()
+```
+
+*Based on our results, we can see the skill levels of the golfers vary. Golfer three is the most talented golfer with hitting the longest shot over every other golfer. In contrast, golfer six is the least talented. Golfer one, two, four, and five are all pretty similar in talent. This shows us that the golfer might be a confounding variable and affect the overall total distance of the ball.*
+
+
+
+#### Part 4
+Fit the appropriate model for this study. Check the assumptions of this model. 
+```{r}
+# Running the ANOVA test with blocking
+golf.analysis <- aov(totdist ~ golfer + club, data=golf)
+
+# Testing Assumptions
+autoplot(golf.analysis)
+
+# Running summary of test
+summary(golf.analysis)
+```
+
+*We can see the data in the QQ plot fits normality towards the middle with some points being pretty far from the line at the beginning. The scale location and residual plot are not perfectly horizontal but nothing unusual.*
+
+
+
+#### Part 5
+Explain your results, citing the test statistic(s), degrees of freedom, and the p-value(s). What are your conclusions in the context of the problem?
+
+*We can see that the golfer provides an F value of 79.02 with 5 and 15 degrees of freedom. With the p-value of 3.1e-10 we can suggest that there is significant evidence that the golfer affects the total distance of the ball. Along with this, we can see that the club has an F value of 0.0159 with 3 and 15 degrees of freedom. With the p value of 0.0159, we can say there is significant evidence that the club also affects the total distance of the ball. Since we don't know specifically where the difference is, we will have to perform a multiple comparisons test to find it.*
+
+
+
+#### Part 6
+If necessary, perform multiple comparisons and explain the results. If multiple comparisons are not necessary, explain why.
+```{r}
+golf.mc <- emmeans(golf.analysis, "club")
+contrast(golf.mc, "pairwise")
+```
+
+*Based on the results of the multiple comparisons test, we can see that the difference between Driver 4 and Driver 2 as well as Driver 3 and Driver 4 have a p value that is less than 0.05. This means that the contrast between the two clubs provides a significant difference to the total difference to the ball.*
+
+*Therefore, we have provided significant difference that certain drivers can result in a longer distance shot.*
+
+
+-------
+
+-------
+
+-------
+
+-------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

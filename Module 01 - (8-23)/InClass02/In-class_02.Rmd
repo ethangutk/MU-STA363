@@ -1,0 +1,230 @@
+---
+title: "Class 02: Basic Data Management and *t*-test review"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+```
+
+
+We introduce an example using real data from Miami University to illustrate some data manipulation and extraction in the `tidyverse`, as well as a review of the independent samples $t$-test from introductory statistics.
+
+## Example: Instructor evaluations in MKT at Miami
+
+The following data consists of class section-level instructor evaluations in the Marketing department at Miami University over the period 2012-2018. The variables in the dataset are as follows:
+
+* `Term`	-- Academic Year/Term (e.g., 201710=Fall 2016, 201720=Spring 2017)
+* `Instructor`	-- Random instructor ID
+* `Course`	-- Course Type (1=FSB Core, 2=MKT Core, 3=MKT Elective, 4=Marketing Capstone)
+* `Enrolled`	-- Number of student enrolled in class
+* `Completed`	-- Number of students completing course evaluaiton survey
+* `PerCent`	-- Percent of enrolled students completing survey
+
+**The survey question items are as follows.**  Each item was scored by individual students on a 0 to 4 scale (0=Strongly Disagree, 1=Disagree, 2=Neutral, 3=Agree, 4=Strongly Agree).  The entries in the data are class-level mean ratings:
+
+* `iStandards` -- *"The instructor held students to high academic standards."*  
+* `iChallenged`	-- *"The instructor effectively challenged me to think and learn."*  
+* `iPrepared`	-- *"The instructor was well prepared."*  
+* `iConcepts`	-- *"Examinations and/or other graded components covered course concepts in a challenging manner."*  
+* `iEnthusiasm`	-- *"The instructor showed enthusiasm for the subject."*  
+* `iAskQues`	-- *"I felt free to ask questions and to make comments in class."*  
+* `iQuesEffect`	-- *"The instructor dealt with questions and comments effectively."*  
+* `iHours`	-- *"The instructor was generally available during office hours."*  
+* `iRating`	-- *"What is your overall rating of the instructor?"*  
+* `iWelcQues`	-- *"My instructor welcomed students' questions."*  
+* `iParticipate` -- *"My instructor offered opportunities for active participation to understand course content."*  
+* `iDemo`	-- *"My instructor demonstrated concern for student learning."*  
+* `iAnalyProb`	-- *"In this course I learned to analyze complex problems or think about complex issues."*  
+* `iTopicApp`	-- *"My appreciation for this topic has increased as a result of this course."*  
+* `iUnderstand`	-- *"I have gained an understanding of this material."*  
+
+
+### Data Input
+
+We read the data directly from the CSV file in Hughes' data repository into a data set called `evals` using the following code.  Because the file is remote, the `read.csv` function must include the path to the file's location:
+
+```{r getData}
+evals <- read.csv("http://users.miamioh.edu/hughesmr/sta363/teachingEvals.csv")
+glimpse(evals)
+```
+
+### Data Cleaning 
+
+A bit of tidying up the data for analysis is in order.  Changing variables in the data can be accomplished using the `mutate` function from the `tidyverse`.  Here, the `Term` variable is in a Miami-specific form which R is reading numerically, so we want to change its variable type to a factor (so it will be treated categorically instead of numerically). Likewise, we do the same with the Instructor variable.  We also want to add meaningful labels to the `Course` variable:
+
+```{r}
+evals <- evals %>%
+  mutate(Term = as.factor(Term),
+         Instructor=as.factor(Instructor),
+         Course=factor(Course, 1:4, labels=c("FSB Core", "MKT Core", "MKT Elective", "MKT Capstone")))
+glimpse(evals)
+```
+
+## Example Question
+
+Is there a statistical difference in "FSB Core" versus "MKT Core" courses on overall instructor ability to deal with questions and comments effectively in the 2016-2017 academic year?
+
+### Fetch relevant data
+
+```{r}
+evals2017 <- evals %>% 
+  filter(Term %in% c("201710", "201720"),
+         Course %in% c("FSB Core", "MKT Core")) %>%
+  select(Course, iQuesEffect)
+```
+
+Here is the pipe operator `%>%` in action again.  The code above starts with the `evals` data, and then does the following in sequence:
+
+1. Extracts cases where `Term` is during the 2017 academic year and where the `Course` is either FSB Core or MKT Core
+2. Selects from those cases only two variables to retain: `Course` and `iQuesEffect` (note that this step is actually not necessary) 
+3. Assigns the result to an R object that we name `evals2017`
+
+### EDA
+
+Since we are comparing two types of courses, we should prepare some descriptive statistics by `Course`.  We have already filtered down to the two course types of interest in the previous code chunk, so now we just need to summarize results as we wish using the `group_by` function to organize the information.
+
+The code below does the following in sequence:
+
+1. Pipes the `evals2017` data object to the `group_by` function
+2. `group_by` organizes the data by `Course`
+3. `summarize` calculates the mean, standard deviation and five-number summary of the `iQuesEffect` variable separately for each `Course`.  This information is stored in objects we name as `Mean`, `SD`, `Min`, etc.
+4. We use `kable` to make a nicely formatted table of the resulting calculations.
+
+```{r}
+evals2017 %>%
+  group_by(Course) %>%
+  summarize(Mean=mean(iQuesEffect),
+            SD=sd(iQuesEffect),
+            Min=min(iQuesEffect),
+            Q1 = quantile(iQuesEffect, prob=0.25),
+            Median=median(iQuesEffect),
+            Q3 = quantile(iQuesEffect, prob=0.75),
+            Max=max(iQuesEffect)) %>%
+  kable()
+```
+
+A data visualization that enables us to see the `iQuesEffect` distributions side-by-side is valuable in giving us a preliminary sense of how these two course types differ with regard to how students feel about instructors ability to deal with questions and comments effectively.  Also, because we will perform a *t*-test, side-by-side boxplots will allow us to check the assumption of equal population variances. 
+
+The following code chunk uses `ggplot`.  It operates on the `evals2017` object, and establishes **plot aesthetics** (`aes`) whereby the `Course` variable will plot on the horizontal (x) axis, and information about `iQuesEffect` will plot on the vertical (y) axis.  The plot elements are then added as **layers** by adding components with the `+` symbol:
+
+1. `geom_boxplot()` specifies to make boxplots
+2. `stat_summary` adds a diamond-shaped point to the boxplots at the group mean (the options add specific formatting detail to the plotted symbol)
+3. the overall "theme" of the plot is set to a minimal layout.
+
+```{r}
+ggplot(evals2017, aes(x=Course, y=iQuesEffect)) + 
+  geom_boxplot() + 
+  stat_summary(fun=mean, geom="point", shape=23, size=3, fill="gray60") + 
+  theme_minimal()
+```
+
+The mean rating for FSB core instructors seems a bit higher than for MKT core instructors.  However, you can also clearly see that there are concerns about the equal variance assumption.
+
+### Formal hypothesis test
+
+We now want to run an **independent samples *t*-test** to test the hypotheses
+
+$$H_0: \mu_{FSBcore} = \mu_{MKTcore} ~~ \textrm{versus} ~~ H_a: \mu_{FSBcore} \neq \mu_{MKTcore} $$
+
+Even though in intro statistics we run independent samples *t*-tests assuming equal variance, there is a version of the test known as a **Welch *t*-test** that does not require the equal variance assumption.  While it seems like this would generally be a better choice of test to use, the Welch version does suffer compared to the usual independent samples *t*-test in terms of the issue of **power**, which is a test's ability to detect a population difference or effect when one truly exists.  
+
+When the asumption of equal variance is reasonable, the usual *t*-test performs better.  But here, because the assumption is suspect, we will run the Welch *t*-test (triggered by setting the `var.equal` argument to `FALSE`):
+
+```{r}
+t.test(iQuesEffect ~ Course, data=evals2017, var.equal=FALSE)
+```
+
+There is a significant difference in the true mean instructor rating with regards to the ability to deal with questions and comments effectively in the 2016-2017 academic year (*p*-value = 0.0261).  Moreover, we can be 95% confident that the true mean instructor rating in this area is between 0.026 to 0.401 points higher in FSB core courses than in MKT core courses.
+
+### Checking the normailty assumption
+
+Though not generally as crucial an assumption to satisfy as is equal variance or independence, it is still importnant to check normailty, especially if your sample sizes are small.  This can be done visually via **normal quantile-quantile plots** of the data separate by group:
+
+```{r}
+ggplot(evals2017) + 
+  geom_qq(aes(sample=iQuesEffect) ) + 
+  geom_qq_line(aes(sample=iQuesEffect)) + 
+  facet_wrap(~Course)
+```
+
+`geom_qq` and `geom_qqline` are `ggplot2' functions that create normal Q-Q plots.  If your data were normal, then the plotted points should be hugging the lines pretty closely. Here, things look a bit suspect of non-normality, especially among the MKT data. This might cast some doubts on the validity of the inference we just made. 
+
+
+## In-class Assignment
+
+Now you get the opportunity to perform a similar analysis as the example we covered in class today. Below is out an outline of your expectations. The primary task for today is to take the supplied code in the example and modify it for the specific problems we outline below. Some code is provided and space is included for all the *code chunks* needed to do the assignment.
+
+
+## Part 1
+
+We will eventually perform a two-sample $t$-test to compare the Preparedness (`iPrepared`) rating for Instructors coded 6291 and 6090. In the next chunk author some code to filter down to the relevant and necessary data.
+
+```{r, warning=FALSE}
+evalspreparedness <- evals %>% 
+  filter(Instructor %in% c("6291", "6090")) %>%
+  select(Instructor, iPrepared)
+```
+
+
+## Part 2
+
+In the next code chunk construct a graphic to compare the teaching evaluations for Instructors 6291 and 6090 based on the Preparedness metric.
+
+```{r, message=FALSE}
+ggplot(evalspreparedness, aes(x=Instructor, y=iPrepared)) + 
+  geom_boxplot() + 
+  stat_summary(fun=mean, geom="point", shape=23, size=3, fill="gray60") + 
+  theme_minimal()
+```
+
+What are your findings based on the graphic from Part 3 and the numeric summary in Part 2?
+
+**The Instructor 6090 has a bigger range of answers for preparedness compared to instructor 6291 but are relativily the same.**
+
+
+
+## Part 3
+
+Perform the appropriate $t$-test (equal or unequal variance assumption) comparing the teaching evaluations for the two instructors.
+
+
+```{r, message=FALSE}
+t.test(iPrepared ~ Instructor, data=evalspreparedness, var.equal=FALSE)
+```
+
+Did you choose an equal variance or unequal variance test? Why?
+
+**Equal Varience**
+
+What are the findings from this test?
+
+**Since the p-value is greater than 0.05, the preparedness averages are equal.**
+
+
+## Part 4
+
+Assess the normality assumption for the performed $t$-test in the below code chunk.
+
+```{r, message=FALSE}
+ggplot(evalspreparedness) + 
+  geom_qq(aes(sample=iPrepared) ) + 
+  geom_qq_line(aes(sample=iPrepared)) + 
+  facet_wrap(~Instructor)
+```
+
+Do you have any concerns about the Normality assumption? What does this imply about the test if anything.
+
+**The data in this has a normal distribution since the data does not disposition from the line very much.**
+
+
+
+
+
+

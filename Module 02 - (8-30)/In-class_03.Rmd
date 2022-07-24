@@ -1,0 +1,321 @@
+---
+title: "Class 03: Paired *t*-test; Intro to Design of Experiments"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Packages we will use today; note one new pacakge: `ggfortify`.
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+```
+
+
+
+# Designed Experiments
+
+In many situations, a practitioner simply collects measurements on predictor and response variables as they naturally occur, without intervention from the data collector. Such data is called **observational data** or data derived from an **observational study**.  An example is the MKT Teaching Evaluations data.
+
+In a **designed experiment**, a researcher *manipulates* one or more variables, while holding all other variables constant. Typically the values of the predictor variables are discrete (that is, a countably finite number of controlled values). The main advantage of well-designed experiments over observational studies is that we can establish cause and effect relationships between the predictors and response. One of the most important things to keep in mind with analyzing designed experiments is that **the structure of the experiment dictates how the analysis may proceed**. 
+
+### A paired-data experimental design
+
+Twenty (20) mice received a dietary treatment during 3 months. We want to know whether the dietary treatment has an impact on the weight of the mice. To answer to this question, the weight of the 20 mice have been measured before and after the treatment.
+
+* **Response variable**: *Weight of Mice*
+* **Experimental Unit**: *The 20 mice. More specifically each mouse would be one mouse.*
+* **Factor**: *Time (before and after)*
+* **Controls**: *Pairing: looking at the exact same mice before and after treatment. The only source of variablilty is time.*
+
+*Note:* Although we are using pairing in this experiment, it is far from a *perfectly* designed experiment. The pairing helps control nuisance variation that each mouse may contribute, but other nuisance effects may still be present (for example, environmental factors on a particular mouse).
+
+
+# Analysis tool when you have paired data -- paired $t$-test
+
+**Let's revisit the MKT instructor evaluation dataset**, but ask a different question that involves looking at *paired data* rather than independent samples (which we saw in Class 02).  You may look back at the Class 02 RMarkdown to remind yourself of the complete contents of the dataset, but here is are the relevant variables for this upcoming question:
+
+* `Instructor`	-- Random instructor ID
+* `Course`	-- Course Type (1=FSB Core, 2=MKT Core, 3=MKT Elective, 4=Marketing Capstone)
+* `iStandards` -- *"The instructor held students to high academic standards."* (Scored on 0-4 scale)  
+* `iEnthusiasm`	-- *"The instructor showed enthusiasm for the subject."*  (Scored on 0-4 scale) 
+ 
+**Research question:** Among FSB Core courses, is there significant evidence to conclude that students (on average) rate instructors higher on enthusiasm as opposed to holding students to high academic standards?
+
+*Note:* Even though the data collected here is from an observational study, rather than a **designed experiment**, this would still be analyzed using a paired *t*-test. 
+
+
+The standard protocol for analysis is:
+
+1. Read in the data
+2. Effectively clean and filter the data we need
+3. Perform the EDA and make observations
+4. Check assumptions underlying the formal analysis
+5. Perform the inferential analysis (hypothesis test/CI) and interpret the result
+
+```{r readData}
+evals <- read.csv("http://users.miamioh.edu/hughesmr/sta363/teachingEvals.csv")
+```
+
+```{r cleanData, message=FALSE}
+# Filter FSB Core courses only, retain relevant variables
+FSBcoreevals <- evals %>%
+  mutate(Instructor=as.factor(Instructor)) %>%
+  filter(Course == 1) %>%
+  group_by(Instructor) %>%
+  summarize(iStandards = mean(iStandards),
+            iEnthusiasm = mean(iEnthusiasm)) %>%
+  select(Instructor, iStandards, iEnthusiasm)
+
+head(FSBcoreevals)
+```
+
+A plot illustrating the distributions of evalations scores in these two areas, as well as stressing the paired nature of the evaluations by instructor, is given below.  The solid red lines connect the sample means between the two items of evaluation; the transparent lines link the mean evaluations by each individual instructor:
+
+```{r plotData, echo=FALSE}
+# Process data and convert to tall mode to create profile plot
+FSBcoreevals.tall <- FSBcoreevals %>%
+  pivot_longer(c(iStandards, iEnthusiasm), names_to="EvalType", values_to="Mean") %>%
+  mutate(EvalType=factor(EvalType, levels=c("iStandards","iEnthusiasm")))
+
+# Make profile plot with mean overlays
+ggplot(FSBcoreevals.tall, aes(x = EvalType, y = Mean)) + 
+  geom_boxplot() +
+  geom_point(aes(group = Instructor, color = Instructor), alpha = 0.4) +
+  geom_line(aes(group = Instructor, color = Instructor), alpha = 0.4) + 
+  stat_summary(fun = "mean", size = 3, geom = "point", color="red") +
+  stat_summary(fun = "mean", size = 1, geom = "line", color="red", aes(group = 1)) +
+  theme(legend.position = "none") +
+  ylab("Mean Evaluation") +
+  xlab("Evaluation Item") 
+```
+
+There is some indication that instructors in FSB Core courses are generally rated higher on enthusiasm than on holding students to high academic standards; however, there is a lot of instructor-to-instructor variabiity.  
+
+Before doing the paired *t*-test, let's check the assumption of normality of the difference scores.  We begin by calculating each instructor's mean difference score, and then building a normal Q-Q plot for these differences:
+
+```{r}
+FSBcoreevals <- FSBcoreevals %>%
+  mutate(Difference = iStandards - iEnthusiasm)
+
+# Check the pairwise calculation
+head(FSBcoreevals)
+
+# Make the normal Q-Q plot
+ggplot(FSBcoreevals) + 
+  geom_qq(aes(sample = Difference)) + 
+  geom_qq_line(aes(sample = Difference))
+```
+
+Normality looks fine here, so we proceed with the formal paired *t*-test:
+
+```{r}
+t.test(FSBcoreevals$iStandards, FSBcoreevals$iEnthusiasm, paired=TRUE)
+```
+
+There is a significant difference in the true mean instructor rating on enthusiasm vs. holding students to high academic standards in FSB Core courses (*t* = -2.775, *p*-value = 0.01204).  We can be 95% confident that the true mean instructor rating on holding students to high academic standards is between 0.0265 to 0.1894 points lower than the corresponding mean rating on enthusiasm.
+
+See the textbook for more details on implementing a paired $t$-test in R.
+
+###  A completely randomized experimental design (CRD)
+
+Forty (40) mice are randomly assigned to two different dietary treatment groups, the regular dietary treatment, and the low-fat dietary treatment, for 3 months. We want to know whether the two dietary treatment have different impacts on the weight of the mice. To answer to this question, the weight of the 40 mice have been measured before and after the treatment.
+
+* **Response variable**: *Change in weight after treatment.*
+* **Experimental Unit**: *A mouse.*
+* **Factor**: *Different Diets/Treatments (not time since our respoonse is the change in weight)*
+* **Controls**: *One group is a regular dietary group (control group), random assignment, pairing (still the same mice)*
+ 
+ 
+
+# One-Way ANOVA (Analysis of Variance)
+
+Let's return to the setting of independent (not paired) samples again (see Class 02).  When comparing two populations, we used an independent-samples *t*-test before. Consider the following:
+
+**Example:** A tire manufacturer is interested in investigating the handling properties for different tread patterns. Data were recorded on the stopping distances measured to the nearest foot for a standard sized car to come to a complete stop from a speed of 60 miles per hour. There are six measurements of the stopping distance for each of four different tread patterns labeled A, B, C and D. The same driver and car were used for all 24 measurements and, although not clear from the saved data file, the order of treatments were assigned at random.
+
+*Source*: Ugarte, M. D., Militino, A. F., and Arnholt, A. T. (2008) Probability and Statistics with R. Chapman \& Hall/CRC.
+
+```{r}
+Tire <- read.csv("http://users.miamioh.edu/hughesmr/sta363/TireData.csv")
+glimpse(Tire)
+```
+
+Answer the following questions about the experimental design.
+
+* What are the **Experimental Units** in this study? 
+     - *The car (individual runs of the car)*
+* What is the **factor** in this study? 
+     - *Tread Type*
+* How many **factor levels** are there? 
+     - *4 Levels: A B C and D*
+* What are the **treatments**?  
+     - *Tire Treads*
+* What other steps were taken to control for nuisance variables and unexplained variability? 
+     - *Same driver, same car, order is random, same speed, replication.*
+
+
+### EDA
+
+As with all analyses, we begin with an exploratory data analysis. This will reveal some basic information regarding the data. Since we are interested in tire-level information, we `group_by` tire type and calculuate summary values.
+
+```{r, message=FALSE}
+Tire %>% 
+  group_by(tire) %>% 
+  summarize(Mean=mean(StopDist), 
+            SD=sd(StopDist),
+            Var=var(StopDist), 
+            N=n() ) %>% 
+  kable()
+```
+
+Next, we wish to graphical explore the data. In the code chunk below, write code that will construct side-by-side boxplots of the stopping distance as a function of the tire type.
+
+```{r}
+ggplot(Tire, aes(x=tire, y=StopDist)) +
+  geom_boxplot() +
+  labs(x="Tire Tread Type", y="Stopping Distance") + 
+  theme_bw()
+```
+
+Discuss the pros and cons of the above plot
+
+* **Pro**: *ANSWER HERE*
+* **Con**: *ANSWER HERE*
+
+```{r}
+ggplot(Tire, aes(x=tire, y=StopDist)) +
+  geom_jitter(width=0.1) +
+  labs(x="Tire Tread Type", y="Stopping Distance") + 
+  theme_bw()
+```
+
+This is known as a *Jittered* dot plot - we have added some horizontal variation in the data strictly for visualizing the data (the data itself it not being changed).
+
+* **Pro**: *ANSWER HERE*
+* **Con**: *ANSWER HERE*
+
+ 
+
+**What next?**  To compare the stopping distance across different tire tread types, we will conduct **one-Way ANOVA** -- but that will wait until the next class meeting!"
+
+
+
+## Now it's your turn!!!
+
+Please type your answers (and relevant code if applicable) in the **ANSWER HERE** locations in this file for the problems.  
+
+## Problem 1
+
+An investigator is interested in the effects of sleep deprivation on memory function. He randomly assigns each of 60 participants to one of several study conditions. Fifteen subjects take a test of memory function after they have been awake for eight hours (No sleep deprivation). Fifteen subjects take the test after they have been awake for 18 hours (mild sleep deprivation). Fifteen subjects take the test after they have been awake four 24 hours (moderate sleep deprivation).  Fifteen subjects take the test after they have been awake for 48 hours (severe sleep deprivation). Higher scores on the test of memory function indicate higher levels of performance.
+
+Answer the following questions about the experimental design.
+
+* What are the **Experimental Units** in this study? 
+     - **60 Participants/People**
+* What is the **response variable** in this study? 
+     - **Test scores of the memory test**
+* What is the **factor** in this study? 
+     - **Time the participants have been awake.**
+* How many **factor levels** are there? 
+     - **Four: 8 hours, 18 hours, 24 hours, and 48 hours.**
+* What are the **treatments**?  
+     - **Time the participants have been awake.**
+* Cite **two ways** that the researcher took to control for nuisance variables and unexplained variability.
+     - **He randomly assigned treatments to the EUs**
+     - **It is the same people that are tested before and after.**
+
+
+## Problem 2
+
+For each of the scenarios described below, cite whether the problem is from an **observational study** or a **designed experiment**, and why.
+
+
+
+* A group of scientists wanted to test a new drug that's made to help people suppress their alcohol addiction. The scientists gathers a random sample of 200 alcoholics and then divides them into two groups; one receiving the drug and the other a placebo. They then will collect data on if the drug is effective or not. 
+
+**Designed. They give exactly 100 people a treatment and the other 100 people nothing. This experiment was set up, not observed.**
+
+
+
+* A group of students wanted to know if there is a relationship between attending after school activities and GPA. They then use a survey to gather their data from students who do attend after school activities and who doesn't attend and ask for their current GPA.
+
+**Observational. They did not have an organized group of EUs with different treatments. They simply looked at a situation that was already happening and observed the results.**
+
+
+
+
+## Problem 3
+
+Let's play with the teaching evals data in this part!
+
+**Research question:** Among **MKT** Core courses, is there significant evidence to conclude that students (on average) rate instructors higher on enthusiasm as opposed to holding students to high academic standards? Please conduct relevant data processing and appropriate analysis. 
+
+## Read in the data
+```{r readDataProb3}
+evals <- read.csv("http://users.miamioh.edu/hughesmr/sta363/teachingEvals.csv")
+```
+
+## Filter Data
+```{r cleanDataProb3, message=FALSE}
+# Filter FSB Core courses only, retain relevant variables
+MKTcoreevals <- evals %>%
+  mutate(Instructor=as.factor(Instructor)) %>%
+  filter(Course == 2) %>%
+  group_by(Instructor) %>%
+  summarize(iStandards = mean(iStandards),
+            iEnthusiasm = mean(iEnthusiasm)) %>%
+  select(Instructor, iStandards, iEnthusiasm)
+
+head(MKTcoreevals)
+```
+
+
+## Perform EDA and make observations
+```{r plotDataProb3, echo=FALSE}
+# Process data and convert to tall mode to create profile plot
+MKTcoreevals.tall <- MKTcoreevals %>%
+  pivot_longer(c(iStandards, iEnthusiasm), names_to="EvalType", values_to="Mean") %>%
+  mutate(EvalType=factor(EvalType, levels=c("iStandards","iEnthusiasm")))
+
+# Make profile plot with mean overlays
+ggplot(MKTcoreevals.tall, aes(x = EvalType, y = Mean)) + 
+  geom_boxplot() +
+  geom_point(aes(group = Instructor, color = Instructor), alpha = 0.4) +
+  geom_line(aes(group = Instructor, color = Instructor), alpha = 0.4) + 
+  stat_summary(fun = "mean", size = 3, geom = "point", color="red") +
+  stat_summary(fun = "mean", size = 1, geom = "line", color="red", aes(group = 1)) +
+  theme(legend.position = "none") +
+  ylab("Mean Evaluation") +
+  xlab("Evaluation Item") 
+```
+
+
+## Check assumptions of normality 
+```{r}
+MKTcoreevals <- MKTcoreevals %>%
+  mutate(Difference = iStandards - iEnthusiasm)
+
+# Check the pairwise calculation
+head(MKTcoreevals)
+
+# Make the normal Q-Q plot
+ggplot(MKTcoreevals) + 
+  geom_qq(aes(sample = Difference)) + 
+  geom_qq_line(aes(sample = Difference))
+```
+
+
+## Perform paired t-test
+```{r}
+t.test(MKTcoreevals$iStandards, MKTcoreevals$iEnthusiasm, paired=TRUE)
+```
+
+
+**Significant evidence that there is not a difference. There is not a significant difference in the true mean instructor rating on enthusiasm vs. holding students to high academic standards in MKT Core courses (*t* = -3.5642, *p*-value = 0.00144).  We can be 95% confident that the true mean instructor rating on holding students to high academic standards is between 0.1708 to 0.0459 points lower than the corresponding mean rating on enthusiasm.**
+

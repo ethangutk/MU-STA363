@@ -1,0 +1,142 @@
+---
+title: "Homework2"
+author: "Ethan Gutknecht"
+date: "9/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(emmeans) 
+```
+
+```{r}
+df1 <- read.csv("https://raw.githubusercontent.com/hellomissingdata/STA363/main/nail-polish.csv")
+glimpse(df1)
+```
+## Question 1
+A student, preparing for a triathlon, suspected that the 45 minutes each day she spent training in a chlorinated pool was damaging her nail polish. She wished to investigate whether the color of the nail polish might make a difference. She mounted acrylic nails on sticks and polished them with two different color nail polishes. She soaked them together in a chlorine solution equivalent to a swimming pool’s chlorination and then tapped them 100 times on a computer keyboard to simulate daily stress. She then recorded the % of nail chipped off as measured by scanning images of the nails and using an image processing program. She wishes to find out if the % of nail polish chipped off vary between the two different colors she uses.
+
+#### Part 1
+Comment on the design of the experiment. Specifically state all the design elements in the context of the problem: the experimental units, the response variable(s), the factor, factor levels, and the treatments. If you were her, what would you do in the experiment to control for nuisance variation or confounding variables?
+
+* **Response variable**: *Percentage of nail polish chipped off.*
+* **Experimental Unit**: *Acrylic nails on sticks with nail polish on them.*
+* **Factor**: *Nail polish.*
+* **Factor Levels**: *Two different colors of nail polish.*
+* **Treatments**: *Soaking it in Chlorine for 45 minutes AND tapping them 100 times.*
+* **Controls**: *Pairing: looking at the exact same mice before and after treatment. The only source of variability is time.*
+**I would make sure that the nail polish comes from the same brand and I put try to control the taps of the keyboard as much as I can.**
+
+
+
+#### Part 2
+Build an appropriate plot for the design of data. Comment on what you see, including comments on the average and variation in the response. Make sure your plot is properly labeled and would be understandable to an outside viewer (that is, the labels and titles explain the context). 
+
+```{r, warning=FALSE}
+ggplot(df1) + 
+  geom_boxplot(aes(x=Color, y=PctChipped), col="gray60" ) +
+  geom_jitter(aes(x=Color, y=PctChipped), width=0.1 ) +
+  labs(x="Color", y="Percentage Chipped") + 
+  theme_bw()
+```
+**Since there is one factor in this problem, we are interested in one-way analysis of variance. We can see that the nail polish has similar variety. We can also see that the average for the NUDE color is about 8.0% higher than the red color.**
+
+
+
+#### Part 3
+Perform the appropriate statistical analysis for this design. State the conclusion of the analysis results of the experiment outcomes, in context.
+
+```{r}
+df1.analysis <- aov(PctChipped ~ Color, data=df1)
+summary(df1.analysis)
+```
+**Based on the results, we can see that the the F value was 8.688 with 1 and 28 degrees of freedom. Since the P value of 0.00639 is below 0.05, we have enough evidence to say that the color of the nail polish does not affect the chipping percentage of the nails.**
+
+
+
+#### Part 4
+What are the assumptions of the statistical method chosen in part 3? Please perform a residual analysis to check for these assumptions. In your analysis, please provide your graphs and your comments about the model assumptions based on your findings from these graphs.
+```{r}
+# Check Assumptions
+autoplot(df1.analysis)
+```
+
+**For this experiment we are assuming that it has a systematic structure and it has random variation. Below is a bunch of plots that check the assumptions, one being the Q-Q plot, this shows that the data is normally distributed. The scale and residual plot also seems to be linear, therefore our assumptions are met.**
+
+
+
+
+## Question 2
+Contrast baths are a treatment modality commonly used in hand clinics. Yet the benefits of contrast baths have been poorly substantiated. Contrast baths have been suggested for the purposes of reducing hand volume, alleviating pain, and decreasing stiffness in affected extremities. To determine the effects of specific contrast bath protocols on hand volume in patients diagnosed with Carpal Tunnel Syndrome, study participants were randomly assigned to one of three treatment group protocols: contrast baths with exercise, contrast baths without exercise, and an exercise-only control treatment group. Study participants were then evaluated with hand volumetry, before and after treatment, at two different data collection periods: pre- and postoperative. The change in hand volume (the after treatment volume minus the before treatment volume) is the outcome of interest to us.
+```{r}
+df2 <- read.csv("https://raw.githubusercontent.com/hellomissingdata/STA363/main/contrast-baths.csv")
+```
+
+#### Part 1
+Comment on the design of the experiment. Specifically state all the design elements in the context of the problem: the experimental units, the response variable(s), the factor, factor levels, the treatments, and the steps the experimenter took in an attempt to control for nuisance variation or confounding variables. 
+
+* **Response variable**: *The change in hand volume.*
+* **Experimental Unit**: *Patients diagnosed with Carpal Tunnel Syndrome.*
+* **Factor**: *Time.*
+* **Factor Levels**: *Before and after the treatment was put on.*
+* **Treatments**: *Contrast baths with exercise, Contrast baths without exercise, and an exercise-only control treatment group.*
+* **Controls**: *Same amount of time. Looks at same patients to record data.*
+**I would make sure that each experiment was done under the same conditions.**
+
+
+
+#### Part 2
+Perform a meaning/helping EDA for this data. Comment on what you see, including comment on average and variation in hand volume change.
+```{r, warning=FALSE}
+glimpse(df2)
+ggplot(df2) + 
+  geom_boxplot(aes(x=Treatment, y=Hand.Vol.Chg), col="gray60" ) +
+  geom_jitter(aes(x=Treatment, y=Hand.Vol.Chg), width=0.1 ) +
+  labs(x="Treatment", y="Hand Volume Change") + 
+  theme_bw()
+```
+**The exercise column is has a very narrow variation compared to the other two columns. The Bath+Exercise column has the highest average with the Bath column not far behind. The lowest average is the exercise column with also the lowest variability.**
+
+
+
+#### Part 3
+Perform the appropriate statistical analysis for this design. Cite the statistics value, degrees of freedom, p-value, and the conclusion in problem context.
+```{r}
+df2.analysis <- aov(Hand.Vol.Chg ~ Treatment, data=df2)
+summary(df2.analysis)
+```
+**Here are the results. We can see that the F value is 7.415 with 2 and 56 degrees of freedom. The P-value is 0.00139, therefore we have enough evidence to say that the treatment does affect the change in hand volume. Thus we will perform a multiple comparisons test after we test the assumptions.**
+
+
+
+#### Part 4
+Generate the residual plots for the statistical method chosen in part 4 to check the model assumptions. Provide the graphs and comments about the model assumptions based on your findings from these graphs.
+```{r}
+# Check Assumptions
+autoplot(df2.analysis)
+```
+**The scale-location has a slight bend in the graph, therefore the variance between the three methods are not uniform. The data seems to be normal and the Residual vs Fitted graph is linear.**
+
+
+
+#### Part 5
+Perform appropriate multiple comparisons if necessary and report the results in context.  You must defend your choice to use Tukey or Dunnett. 
+```{r}
+df2.mc <- emmeans(df2.analysis, "Treatment")
+contrast(df2.mc, "pairwise")
+```
+**Since there was a difference between the three treatments, now we have to locate where that treatment is. Along with this, our experiment has no "control" so we will be performing Tukey's Multiple Comparisons test since it will test all possible combinations between the treatments to find where the difference lies.**
+
+**Based on our results, we can see that the only treatment that has a value less than 0.05 is the Exercise treatment. This means that the treatment Exercise has a significant impact on the change in hand volume.**
+
+
+
+
+

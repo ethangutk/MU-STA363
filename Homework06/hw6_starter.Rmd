@@ -1,0 +1,289 @@
+---
+title: "Homework #6"
+author: "Ethan Gutknecht"
+date: "November 22, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GGally)
+library(ggfortify)
+library(leaps)
+library(car)
+library(tidymodels)
+library(knitr)
+
+library(gridExtra)
+library(lindia)
+library(leaps)
+library(car)
+library(caret)
+library(kableExtra)
+```
+
+## Load Data
+
+```{r}
+# "music_for_training"
+load("spotify_training.RData")
+
+# tracks_to_predict
+load("tracks_to_predict_2021.RData")
+
+
+# Shows the actual names of the data sets
+ls()
+```
+
+
+
+
+
+# Part 1: Inference with Large Samples
+
+## Problem 1
+Build side-by-side Boxplots with overlayed means comparing the tempo of songs to the recorded key signature (key_mode in the data). Make sure the plot is properly labeled and titled. Does the distribution of tempo appear different for these key signatures? 
+**The distrubution and temp does not look like the tempos differs between keys **
+```{r}
+# Create box plot
+tempo_vs_keymode_Boxplot <- ggplot(data = music_for_training, aes(key_mode, tempo))
+tempo_vs_keymode_Boxplot + geom_boxplot() + xlab("Key") + ylab("Tempo")
+
+```
+
+
+
+## Problem 2
+Perform a One-Way ANOVA test to compare the mean tempo as a function of key_mode. Make sure to properly state the outcome of the results. No need to check assumption or perform follow-up multiple comparisons.
+**Based on the results, we can see that the test says that the tempo differs between keys.**
+```{r}
+tempo_keymode.anova <- aov(tempo ~ key_mode, data=music_for_training)
+summary(tempo_keymode.anova)
+```
+
+
+
+## Problem 3
+Does the ANOVA result agree with your analysis of the Boxplots?  Discuss.
+**No it does not. The ANOVA model says that there is a difference between at least one of the key modes where as the box plot looks like they are all the same.**
+
+
+
+## Problem 4
+Read sections 1 and 2 of the journal article "The p-value you can't buy" (pdf). Based on that article and the analysis in #2, #3 and #4 above, describe/discuss the limitations of using an ANOVA in this setting.
+**This article says that there was a recent study that revealed another negative feature of the P-value. That being, if your sample size is huge your null hypothesis will always be rejected. They offer a solution called the D-value but that is something that we will not discuss. This applies to our data since our sample size is well...huge. That is why we reject the null hypothesis in the ANOVA test.**
+
+
+
+
+
+# Part 2: EDA of Popularity
+
+## Problem 5
+Construct and describe a histogram (with binwidth=1) of the popularity scores for all observations in spotify_training.
+
+```{r}
+# Create histogram
+spotifyHistogram <- ggplot(data=music_for_training, aes(x=popularity), binwidth = 1)
+spotifyHistogram + geom_histogram() + xlab("Popularity") + ylab("Number Of Songs")
+```
+
+
+
+
+## Problem 6
+Calculate the mean, standard deviation and 5-number summary for the popularity scores in spotify_training and display them in a well-constructed table.
+
+```{r}
+# Create an array of values
+summaryData <- c(fivenum(music_for_training$popularity), mean(music_for_training$popularity), sd(music_for_training$popularity))
+
+# Create the column names
+colnames <- c("Minimum", "Q1","Median", "Q3", "Maximum", "Mean", "STD")
+
+# Put the table together
+knitr::kable(summaryData, caption = "Summary of Popularity")
+knitr::kable(colnames)
+# I tried this but had lots and lots of failure :(
+# knitr::kable(summaryData, row.names = colnames, caption = "Summary of Popularity")
+```
+
+## Problem 7
+Describe the overall shape and behavior of the popularity scores and what implications this may have on linear regression modeling. 
+**As the popularity score increases on the histogram, the amount of songs that are popular decreases. This makes sense because not everyone can listen to every song on Spotify. Since the data is right skewed, this might have an effect on linear regression.**
+
+
+
+
+
+
+# Part 3: Model Building and Assessment
+
+## Problem 8
+The provided Markdown file includes a model pre-built using the spotify_training data (full_model), do not edit it. Look at the residual plots provided for the full_model, describe any concerns you may have and discuss possible transformations that may be helpful (note, you do NOT need to build a Box-Cox plot).
+```{r full-model, warning=FALSE, cache=TRUE}
+######## WARNING
+### Do NOT edit this Code Chunk
+###   It takes a while to execute but will save
+###   the result for future use (cache=TRUE)
+###
+### It builds the full_model and builds the
+###   residual diagnostics plot, which is what 
+###   takes a while to knit
+full_model <- lm(popularity ~ key_mode + time_signature + duration_ms +
+                   danceability + energy + loudness +
+                   speechiness + acousticness + instrumentalness +
+                   liveness + valence + tempo,
+                 data=music_for_training)
+autoplot(full_model)
+
+```
+
+
+
+
+## Problem 9
+Fit a modified full_model where the response variable has been transformed by a cube-root transformation, that is, (popularity)^(1/3). No need for residual analysis.
+
+```{r}
+# Create modified full fit
+cubic.full_model <- lm((popularity)^(1/3) ~ key_mode + time_signature + duration_ms +
+                   danceability + energy + loudness +
+                   speechiness + acousticness + instrumentalness +
+                   liveness + valence + tempo,
+                 data=music_for_training)
+```
+
+
+
+
+## Problem 10
+Look at the summary output from this model, what do you notice about the overall F-test and marginal t-tests.  Do you think these results are particularly meaningful given the large sample size, reference Part 1 of this assignment in your discussion.
+```{r}
+# Show modified full fit
+summary(cubic.full_model)
+```
+**I don't think the results are that meaningful with how large the sample size is. If we relate it back to part 4 and part 1 of this assignment, we can see that the P value of these test slowly become less reliable as the sample size increases.**
+
+
+
+
+## Problem 11
+For this problem, you must choose 3 candidate models to compare. You must justify your choices. At least one of these models should be based on one of the model selection methods discussed in Module 10. You may use any combinations/transformations of the predictors in the data set, but you must use (popularity)^(1/3) as the response variable in each model. 
+```{r}
+# Step backwards illustration
+step.backward <- stats::step(cubic.full_model, direction="backward")
+
+summary(step.backward)
+
+# Based off of the VIF we remove loudness, acousticness, and energy.
+vif(step.backward)
+
+first_fit <- lm((popularity)^(1/3) ~ key_mode + time_signature + duration_ms + danceability + speechiness + instrumentalness + liveness + valence + tempo, data=music_for_training)
+```
+
+```{r}
+# Find another fits using subset regression
+subs <- regsubsets(formula(cubic.full_model), data=music_for_training, nbest=1, nvmax=4)
+
+# Summary
+summary(subs)
+
+# Best fit 3
+second_fit <- lm((popularity)^(1/3) ~ loudness + acousticness + valence, data=music_for_training)
+
+# Best fit 4
+third_fit <- lm((popularity)^(1/3) ~ duration_ms +loudness + acousticness + valence, data=music_for_training)
+```
+
+
+
+
+## Problem 12
+Build a table that reports the adjusted R-squared, AIC and BIC for the 3 models chosen in problem 11. Which model appears to provide the best fit?
+**The model with the lowest AIC is the Subset of 4 predictors.**
+```{r}
+bind_rows(
+  glance(first_fit)  %>% mutate(Model="Step-wise (backwards)"),
+  glance(second_fit) %>% mutate(Model="Subset (3 Predictors)"),
+  glance(third_fit)  %>% mutate(Model="Subset (4 Predictors)") ) %>%
+  select(Model, Adj.R.Squared = adj.r.squared,
+         AIC, BIC) %>%
+  kable()
+```
+
+
+
+
+## Problem 13
+You should note that the AIC and BIC values for the transformed models are substantially smaller than the full_model (from problem 8). Discuss why it is unfair to compare the AIC and BIC of the models with a transformed response (cube root of response) to the others (not transformed)? Hint: it has to do with the RSS; see Section 6.4.2 (Links to an external site.) of the text.
+**When a model has been transformed, the residual sum of square changes drastically. For this case, when its transformed, our RSS is smaller thus making our AIC smaller.**
+
+
+
+
+## Problem 14
+Based on the three models with a transformed response, which model appears to be the best fit? Justify with a brief discussion.
+**The subset with four predictors seems to be the best fit. This is because the AIC value of this model has the lowest out of the two other models.**
+
+
+
+# Part 4: Model Validation and Out-of-sample Prediction
+
+## Problem 16
+Use a 10-fold cross-validation to compare the models from Problem 11 in terms of their ability to predict the popularity scores of the spotify_training data. To ensure you are using the same validation sets, be sure to set the seed to 363 before each call to the train() function. 
+```{r}
+# Create TC
+our_study <- trainControl(method="repeatedcv", number=5, repeats=10)
+
+
+# First Model
+set.seed(363)
+TCfirst_fit <- train((popularity)^(1/3) ~ key_mode + time_signature + duration_ms + danceability + speechiness + instrumentalness + liveness + valence + tempo, data=music_for_training, method="lm", trControl=our_study)
+
+
+# Second Model
+set.seed(363)
+TCsecond_fit <- train((popularity)^(1/3) ~ loudness + acousticness + valence, data=music_for_training, method="lm", trControl=our_study)
+
+
+# Third Model
+set.seed(363)
+TCthird_fit <- train((popularity)^(1/3) ~ duration_ms +loudness + acousticness + valence, data=music_for_training, method="lm", trControl=our_study)
+```
+
+
+
+
+## Problem 17
+The caret package makes it very easy to fit a wide variety of model types. Try fitting a different type of model (i.e. method is something other than "lm"). A list of available methods can be found here (Links to an external site.). You can use any combination of predictors for this model. Once again, be sure to set the seed to 363 before fitting this model with train().
+```{r}
+set.seed(363)
+TCfirst_fit_glm <- train((popularity)^(1/3) ~ key_mode + time_signature + duration_ms + danceability + speechiness + instrumentalness + liveness + valence + tempo, data=music_for_training, method="glm", trControl=our_study)
+```
+
+
+
+
+## Problem 18
+Compare the results from the 3 models in Problem 16 and the model in Problem 17. Based on the RMSE, predictive R-squared, and MAE, which model appears best at predicting popularity scores?
+```{r}
+cv_study_results <- resamples(list("Backwards"=TCfirst_fit, "3 Predictors"=TCsecond_fit, "4 Predictors"=TCthird_fit, "GLM" = TCfirst_fit_glm))
+bwplot(cv_study_results, metric=c("RMSE", "MAE", "Adjusted R-squared"))
+```
+**Based off of this plot we can see that the best model that predicts the values is the model that has 4 predictors.**
+
+
+## Problem 19
+Use the best model from Problem 18 to predict the popularity scores for the 5,000 songs in the tracks_to_predict data. Determine which 10 tracks have the highest predicted popularity scores. 
+
+```{r}
+# Predict using our model, get the first ten songs
+head(sort(predict(third_fit, newdata=tracks_to_predict, type="response"), TRUE), 10)
+
+# songs with these indexes are predicted to be the most popular
+```
+
+

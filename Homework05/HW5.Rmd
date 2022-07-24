@@ -1,0 +1,162 @@
+---
+title: "STA 363 HW 5"
+author: "Ethan Gutknecht"
+date: "November 5, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Echo code chunks
+knitr::opts_chunk$set(echo = TRUE)
+
+# Import Libraries
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(tidymodels)
+library(leaps)
+library(car)
+library(GGally)
+library(lindia)
+```
+## Fuel Efficiency of Cars 
+
+The data set `HW5_data_cars.csv` contains information on the engine type, fuel efficiency, make, and year of cars. The variables are:
+
+
+ 
+* `driveline` - (1) A string representing whether this is "Rear-wheel drive", "Front-wheel drive", or "All-wheel drive".
+* `hybrid` - (2) Whether this is a hybrid engine or not - that is, if it uses both an internal combustion engine and an electric motor.
+* `city.mpg` - (3) The miles-per-gallon this car gets on average in cities.
+* `fuel.Type` - (4) Whether this car takes "Gasoline", "Diesel fuel", "Electricity", "Compressed natural gas", or "E85" (a term that refers to high-level ethanol-gasoline blends containing 51%-83% ethanol). If it is unknown, it is left blank.
+* `highway.mpg` - (5) The miles-per-gallon this car gets on average on highways.
+* `class` - (6) Whether this is a "Manual transmission" or an "Automatic transmission". If it is unknown, it is left blank.
+* `make` - (7) The maker for this car.
+* `year` - (8) The year that this car was released.
+* `horsepower` - (9) A measure of the engine's power. A unit of power equal to 550 foot-pounds per second (745.7 watts).
+* `torque` - (10) The torque of the engine, measured in lb/ft. When an engine is said to make "200 lb-ft of torque", it means that 200 pounds of force on a 1-foot lever is needed to stop its motion.
+
+ 
+Here we are interested in predicting the miles-per-gallon in cities (`city.mpg`) using the other variables in the data set.
+
+```{r cars}
+cars_data <- read.csv("cars_data.csv")
+head(cars_data)
+```
+
+------
+
+
+------
+
+1. **Construct a scatterplot matrix of all the numeric variables. Interpret the results. In particular, describe the relationship among all numeric variables and their perceived ability to predict the response, the miles-per-gallon this car gets on average in cities. Do you think there is potential multicollinearity? Why or why not? (3pts)**
+
+```{r message=FALSE}
+# Create a scatterplot matrix
+ggpairs(cars_data, columns=c(3,5,8,9,10))
+```
+Horse power and torque are very highly correlated with 0.938. Along with this, highway miles per gallon and city miles per gallon also seem to by highly correlated. 
+
+
+
+
+2. **Fit a regression model for the miles-per-gallon in cities (`city.mpg`) as a function of `class`, `horsepower`, `torque`, and the interaction between `class` and `horsepower`. Construct residual diagnostic plots of that fit. Do there appear to be any assumption violations? (3pts)**
+```{r}
+# Create first fit
+cars.fit_1 <- lm(city.mpg ~ class + horsepower + torque + class:horsepower, data=cars_data)
+
+# Create plots and summary
+autoplot(cars.fit_1)
+summary(cars.fit_1)
+```
+The scale location and residual is not very horizontal. Therefore there seems to be an assumption violation there. Along with this, the normality plot seems to sway in a more positive way off the line towards the end of the graph.
+
+ 
+ 
+ 
+3. **Express the fitted regression model in Part 2 when `class` is "Manual transmission"? (i.e., write down the fitted model equation in your markdown file). (4pts)**
+mpg.city= (Manual Transmission)class + horsepower(X2) + torque(X3) + class:horsepower(X4) + E
+
+
+
+
+4. **Do you think the effect of horsepower on miles-per-gallon in cities depends on the transmission class? Cite the statistic and p-value, to make your conclusion. (3pts)**
+The horse power alone has a P-value of 0.35144 but if you look at the interaction between horsepower and the transmission of the car, we can see that the p-value is 0.00026. Based off of this we can conclude there there  could be an affect on the city miles per gallon based on the transmission and horsepower.
+
+
+
+
+5. **Calculate the VIFs for the fitted model in part 2, do you think there is a concern of multicollinearity based on the results of VIF? (Only look at VIF for numeric variables) (3pts)**
+```{r}
+# Create VIF values for fit
+vif(cars.fit_1)
+```
+Since the VIF value for horsepower is over 10, there is concerns there of multicollinearity. Torque also has a pretty high VIF value of 9.2, but still less than 10.
+
+
+
+
+6. **Fit another regression model with `class`, `horsepower`, `torque`, the interaction between `class` and `horsepower`, and `year`. Note that here `year` is a categorical variable recorded in numbers. Compare this model to the model in Part 2. Which model do you prefer? Why? Support your conclusions with an appropriate hypothesis test. (4pts)**
+```{r}
+# Create new model fit
+cars.fit_2 <- lm(city.mpg ~ class + horsepower + torque + class:horsepower + factor(year), data=cars_data)
+
+# This models fit and summary
+autoplot(cars.fit_2)
+summary(cars.fit_2)
+```
+I would prefer this plot since the residuals vs leverage plot looks a bit more horizontal. The other plots seem very similar.
+
+
+
+
+7. **Now let's focus on the Ford cars in the data set. Please filter your data set to only keep information of Ford cars, and fit the model described in part 2. Construct residual diagnostic plots of that fit. Does there appear to be any assumption violations? (3pts) **
+```{r}
+# Filter fords
+cars_ford <- cars_data %>% filter(make == "Ford")
+
+# Create a fit that takes only fords
+cars.fit_3 <- lm(city.mpg ~ class + horsepower + torque + class:horsepower, data=cars_ford)
+
+# City mpg plots and summary
+autoplot(cars.fit_3)
+summary(cars.fit_3)
+```
+Every plot looks fine besides the normality has a small issue. The normality has a couple points that sway very far upwards towards the end of the plot.
+
+
+
+
+8. **In part 7 we fitted the model described in part 2 to all ford cars and conducted residual diagnostics. Now, can you propose a transformation of the response variable? Please check the residual plots of the model fitted to the transformed data. (6pts) **
+```{r}
+# Create a box cox plot
+gg_boxcox(cars.fit_3)
+
+# Transform response by log
+cars.fit_4 <- lm(log(city.mpg) ~ class + horsepower + torque + class:horsepower, data=cars_ford)
+
+# Check residual plots
+autoplot(cars.fit_4)
+```
+
+
+
+
+9.  **Please fit another regression model with `class`, `horsepower`, `torque`, the interaction between `class` and `horsepower`, and `high.mpg`to the Ford cars data. Compare this model to the model in Part 7, are there any predictors appeared to be significant in Part 7 model output, but not significant in this model? Why would this happen? (6pts)**
+```{r}
+# Create new data set with highway mile per gallon
+cars.fit_5 <- lm(highway.mpg ~ class + horsepower + torque + class:horsepower, data=cars_ford)
+
+# Highway mpg summary 
+summary(cars.fit_5)
+```
+The predictor variable of the interaction between transmission and horsepower became not significant when comparing the city miles per gallon and the highway miles per gallon. This is probably due to the reason that highways usually spent at a constant speed and cities are stop and go. Therefore, the transmission in the city has more influence than the highway.
+
+
+
+------
+
+
+------
+
+

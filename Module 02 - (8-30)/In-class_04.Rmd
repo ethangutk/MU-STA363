@@ -1,0 +1,189 @@
+---
+title: "Class 04: One-way ANOVA"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+```
+
+
+## Tire Example (Revisited)
+
+Recall the other day we introduced the following tire tread data set. The full description is provided again for your convenience.
+
+A tire manufacturer is interested in investigating the handling properties for different tread patterns. Data were recorded on the stopping distances measured to the nearest foot for a standard sized car to come to a complete stop from a speed of 60 miles per hour. There are six measurements of the stopping distance for each of four different tread patterns labeled A, B, C and D. The same driver and car were used for all 24 measurements and, although not clear from the saved data file, the order of treatments were assigned at random.
+
+*Source*: Ugarte, M. D., Militino, A. F., and Arnholt, A. T. (2008) Probability and Statistics with R. Chapman \& Hall/CRC.
+
+```{r}
+Tire <- read.csv("http://users.miamioh.edu/hughesmr/sta363/TireData.csv")
+glimpse(Tire)
+```
+
+Last class, we created the following visualization:
+
+```{r}
+ggplot(Tire, aes(x=tire, y=StopDist)) +
+  geom_boxplot() +
+  labs(x="Tire Tread Type", y="Stopping Distance") + 
+  theme_bw()
+```
+
+## The Analysis - ANOVA
+
+The key difference in this problem is that we are now **comparing more than two populations**, rather than just two like we did earlier.  To analyze this sort of data problem, we will instead perform a One-Way Analysis of Variance (ANOVA).  
+
+### Ideas of ANOVA
+
+We begin with some basic analysis that will also help us explain the concept of One-Way ANOVA. First consider the following overall summary values:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+kable(Tire %>% summarize(Mean=mean(StopDist), Var=var(StopDist), N=n(), SS=var(StopDist)*(n()-1)))
+```
+
+You will note we calculate an **SS** which corresponds to **sum of squares**. Mathematically it is
+
+$$SS_{Total} = \sum_{i=1}^n (Y_i - \bar{Y})^2$$
+
+for observations $Y_i, i=1,\ldots,n$. We call this the sum of squares *total* because it is the total sum of squares in the *entire* sample. You should note this equation is nothing more than $S^2$ from your Intro Statistics course, except it is missing the degrees of freedom $n-1$.
+
+Ultimately, we are interested in comparing the four groups and we saw earlier it appears the type of tire may matter. So how does each tire treatment perform?
+
+```{r, echo=FALSE, message=FALSE}
+kable(Tire %>% group_by(tire) %>% summarize(Mean=mean(StopDist), Var=var(StopDist), N=n(), SS=var(StopDist)*(n()-1) ))
+```
+
+Ultimately we are interested in statistically testing if the type of tire (tread type) influences the mean stopping distance. Statistically we test the null hypothesis of **simultaneous equality of all four true mean stopping distances**:
+
+$$H_0: \mu_A = \mu_B = \mu_C = \mu_D$$
+versus 
+$$H_A: \mu_i \neq \mu_j, ~\textrm{for some}~~ i,j=A,B,C,D$$
+
+If the null hypothesis were true we would expect each of the four sample mean values of stopping distances to be approximately equal, and they should reasonably match the overall sample mean.
+
+A way to measure the difference in the means compared to the overall mean is to look at the sum of squares for each group mean; mathematically:
+$$(379.6667-404.2083)^2 + (405.1667-404.2083)^2 + (421.6667-404.2083)^2 + (410.3333-404.2083)^2 = 5673.125$$
+
+If the null hypothesis were true, the above quantity should be reasonably close to the value of **zero**. If the value greatly exceeds zero, then we could argue that **at least one** of the tire tread's true mean stopping distance is different enough from the others, and we would reject the null hypothesis. The above value is typically known as the **sum of squares model**, **sum of squares treatments**, or the **between groups sum of squares**, labeled $SS_{Treatments}$.
+
+Now the value of 5673.125 seems awfully far away from zero, but we have not accounted for any variability in that measurement (think back to one sample $t$-test, in the numerator you have $\bar{x}-\mu_0$ but that difference is scaled based on the standard error, $s/\sqrt{n}$). We need to account for variability. To consider that, first note that the $SS_{Treatments}$ is essentially a measure of variance. The $SS_{Treatments}$ essentially measures how much variability in the $SS_{Total}$ is explained by the different treatments (*between* the groups). What is left is *unexplained*, or is still within the treatments. This can is determined from the residuals *within* each group (a residual for a single point is $x_i - \bar{x}$), which essentially measures how much random error (or *noise*) is left after we modeled $x_i$ with $\bar{x}$. We can find the total amount of variability unexplained with:
+
+$$SS_{Error} = \sum_{j=1}^{K}\sum_{i=1}^{n_k} (Y_{j,i}-\bar{Y}_{j})^2$$
+for $K$ different groups each of size $n_k$. You'll note the inside summation is essentially the variance (lacking the degrees of freedom) of each group. We have that in a table above!
+$$SS_{Error} = 2471.333 + 852.8333 + 747.3333 + 3027.3333 = 7098.833$$
+Now, note the following:
+$$5673.125 + 7098.833 = 12771.96$$
+which corresponds to the sum of squares total!
+
+### How does ANOVA work?
+
+In the above example, we essentially **decomposed** the variance in the total sample (the sum of squares total) into two parts, the sum of squares *between* the groups (the model or treatments part) and the sum of squares *within* the groups (the error, or *residuals*). If the null hypothesis is true, we would expect $SS_{Treatment}\approx 0$, thus $SS_{Error}\approx SS_{Total}$. If the null hypothesis were not true, we would expect the different treatments to explain most of the variability and thus $SS_{Treatment} \approx SS_{Total}$ with $SS_{Error}\approx 0$.
+
+This process is called Analysis of Variance (ANOVA) because we essentially are comparing variance estimates. The statistic we use is an $F$-statistic, which is based on the Sum of Squares but also incorporates the degrees of freedom to make a proper variance comparison: 
+
+$$F = \frac{SS_{Treatment}/(K-1)}{SS_{Error}/(n_1+\ldots+n_k - K)} = \frac{MS_{Treatment}}{MS_{Error}}$$
+where there are $K$ treatments and each treatment has $n_i$, $i=1,\ldots,K$ replicates.
+
+It can be shown (in STA 463 and STA 466) that if the null hypothesis is true, $MS_{Treatment}\approx MS_{Error}$. Thus if the null hypothesis is true, $F\approx 1$. If the alternative hypothesis is true, $F>1$. 
+
+### Performing One-Way ANOVA in R
+
+Performing ANOVA in R is quite easy if the data has been processed correctly. The results are typically displayed in an ANOVA table but before we look at the output of the fit, we also need to check the underling assumptions for ANOVA (like we did last week with the two-sample $t$-test). First we perform the ANOVA In R:
+
+```{r}
+tire.anova <- aov(StopDist ~ tire, data=Tire)
+```
+
+That's it!  One line, using the same notation as the $t$-test, `response ~ predictor`. **We just fit a model!** We are simply telling R to model the `StopDist` response variable as a function of the predictor variable `tire`. 
+
+When performing ANOVA we make the following assumptions.
+
+* Underlying noise terms (residuals) are independent
+* Residuals have constant variance
+* Residuals are Normally distributed
+
+As before, assessing independence must come from collection of the data (in this case, the design of the experiment). The others can be assessed graphically checking the residuals using the `autoplot()` feature in the `ggfortify` package. The residuals are essentially an estimate of the random error, or noise, terms.
+
+```{r, warning=FALSE}
+library(ggfortify)
+autoplot(tire.anova)
+```
+
+* **Constant variance** - Look at "Residuals vs Fitted" or "Scale-Location" plots. The blue line should be fairly horizontal and not see any systematic patterns in the plotted points. (Put more trust in the line if the sample size is larger).
+* **Normality** - Look at the "Normal Q-Q" plot. Points should reasonably match the plotted 45-degree line.
+
+Overall, we see nothing too concerning in these plots. There could be some concern about the constant variance assumption, but there is nothing too systematic in the plot. 
+
+### ANOVA Output
+
+Since our assumptions check out, we can now perform statistical inference by looking at the ANOVA output.
+
+```{r}
+summary(tire.anova)
+```
+
+Here we see an $F$ = 5.328 statistic on 3 and 20 degrees of freedom, which is significantly different than the value of 1 due to the $p$-value = 0.0073. So we have evidence to suggest the different tire treads influence the stopping distance. However, this $p$-value is only valid since the underlying assumptions of ANOVA are met.
+
+**What next?**  The *F*-test has determined that at least two tread types have different population mean stopping distances.  But, it doesn't tell us anything about *which" tread types might be different.  Do answer this, we need to do some **follow-up multiple comparisons** -- but that will wait until the next class meeting!"
+
+
+
+
+## In-class Assignment
+
+A small experiment was conducted to test the impact lathe speed has on the *surface Finish *(a measure of the overall texture of a surface characterized by the lay, roughness and waviness of the surface). Nine pieces of metal were run through a lathe at three speeds (500, 700 and 900 rpm) sequentially (three at the 500 rpm speed, then three at 700 rpm and lastly three at 900 rpm) and the surface finish (roughness measured in micrometers) of each was measured; the same lathe was used for all nine pieces using the same lathe operator. The data is input into R in the code chunk below.
+
+```{r}
+lathe_data <- data.frame(Speed = factor(c(500,500,500, 700,700,700, 900,900,900)),
+                         Finish = c(8,13,12, 10,16,14, 18,22,18) )
+
+lathe_data %>% 
+        kable()
+```
+Source: Experimental Design & Analysis Reference by ReliaSoft Corporation.
+
+The **experimental units** in this experiment are the nine pieces of metal since they are what is being measured. The **response variable** is the surface finish (roughness), with a single **factor** in the experiment, lathe speed, with three **factor levels** or **treatments**, 500 rpm, 700 rpm and 900 rpm. 
+
+
+
+
+### Problem 1
+
+Discuss the limitations of this experiment. In particular, discuss how the principle of **randomization** is being violated and how improvement in this area might dissipate any issues in the current experiment.
+
+**The experiment will look at the difference between three lathe speeds (500rpm, 700rpm, and 900rpm). The experiment is only done three times allowing outliers to skew the dta**
+
+
+### Problem 2
+
+Ignoring the issues with randomization you discussed above. Build an effective descriptive statistics table or graph to summarize the surface finish as a function of lathe speed. Does it appear lathe speed may influence surface finish?
+
+```{r}
+kable(lathe_data %>% group_by(Speed) %>% summarize(Mean=mean(Finish), Var=var(Finish), N=n(), SS=var(Finish)*(n()-1) ))
+```
+
+**It appears that the higher the lathe speed, the higher the finish is across the metals. It seems that there is a correlation of higher lathe speeds and a higher finish based on the means from the table.**
+
+
+### Problem 3
+
+Ignoring the issues with randomization, perform the appropriate ANOVA $F$-test at $\alpha=1\%$ to statistically determine if there is a difference in mean surface finish for the three lathe speeds.
+
+```{r}
+lathe_data.anova <- aov(Finish ~ Speed, data=lathe_data)
+autoplot(lathe_data.anova)
+summary(lathe_data.anova)
+```
+
+**The results of the ANOVA test shows that we got an F stat of 7.677 with 2 degrees of freedom. The p-value is 0.0222 which is lower than 0.05, thus we reject the null hypothesis of all the speeds being the same.**
+
+
+### Problem 4
+
+In addition to the issues in this experiment regarding randomization, you may note a general lack of replication (only three runs per treatment). Comment on the limitations of this experiment due to the lack of replication and relate those comments to the findings in problems 2 and 3.
+
+**Due to the lack of replication, the answers cannot be distributed normally. This is an assumption that needs to be made when completing the ANOVA test. Thus, the answers in Problem 3 might be skewed due to out of the ordinary observations in the small data set.**

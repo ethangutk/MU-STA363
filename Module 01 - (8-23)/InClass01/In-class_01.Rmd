@@ -1,0 +1,174 @@
+---
+title: "Class 01: An introductory data wrangling and description example"
+author: "Ethan/Gutknecht"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Preliminaries
+
+Before getting started we need to give credit where credit is due. A special thanks to Mine Cetinkaya-Rundel from Duke University for the idea and outlines of this first assignments.
+
+## Opening question
+
+Today we will look at the voting history of countries in the United Nations General Assembly. We will be using data from the `unvotes` package. Additionally, we will make use of the `tidyverse` and `lubridate` packages.
+
+```{r load-packages, warning=FALSE, message=FALSE}
+library(unvotes)
+library(tidyverse)
+library(lubridate)
+```
+
+## Data
+
+We have three datasets we can work with: `un_roll_calls`, `un_roll_call_issues`, and `un_votes`. Each of these datasets contains a variable called `rcid`, the roll call id, which can be used to join them with each other.
+
+- The `un_votes` dataset provides information on the voting history of the United Nations General Assembly. It contains one row for each country-vote pair.
+
+```{r view-un_votes}
+un_votes
+```
+
+- The `un_roll_calls` dataset contains information on each roll call vote of the United Nations General Assembly.
+
+```{r view-un_roll_calls}
+head(un_roll_calls)
+```
+
+- The `un_roll_call_issues` dataset contains (topic) classifications of roll call votes of the United Nations General Assembly. Many votes had no topic, and some have more than one.
+
+```{r view-un_roll_call_issues}
+tail(un_roll_call_issues)
+```
+
+## Analysis
+
+### Larger comparison example
+
+First, let's take a look at how often each country voted "yes" on a resolution in each year. We'll visualize the results, so let's pick a few countries of interest first,
+
+```{r country-list}
+country_list <- c("United States", "China", "Mexico", "Canada")
+```
+
+and focus our analysis on them. In this first *chunk* of code we bring together the `un_votes` dataset with the `un_roll_calls` dataset linking by the `rcid` variable (this is the `inner_join` call). The `filter()` statement limits our data to the countries of interest. The `group_by()` and `summarize()` functions calculate the number of `votes` and the percentage of times a country voted "yes" for each country per year. Lastly we take a sneak peak at our summarized data with the `glimpse()` function.
+
+```{r clean-yearly-yes, fig.width=10, warning=FALSE}
+un_vote.trim <- un_votes %>%
+  filter(country %in% country_list) %>%
+  inner_join(un_roll_calls, by = "rcid") %>%
+  group_by(Year = year(date), country) %>%
+  summarize(votes = n(),
+            percent_yes = mean(vote == "yes"))
+glimpse(un_vote.trim)
+```
+
+Now that we have the data as we way, we can plot it. In the code below note that we are letting the Country determine the color of the line.
+
+```{r plot-yearly-yes, fig.width=10, warning=FALSE, fig.cap="Figure 1: UN voting records over time for 4 countries. The four lines are close together until the late 1960s, but after that they gradually split with Mexico at about 90%, China at about 80%, Canada at about 50%, and the US at about 20% over the last 50 years."}
+ggplot(un_vote.trim, aes(x = Year, y = percent_yes, color = country)) +
+  geom_line() +
+  ylab("% of votes that are 'Yes'")
+```
+
+#### Discussion
+
+What do you notice about the difference in the countries?
+
+
+### Comparison of two countries
+
+Next, let's see how *United States* and *China*'s voting record changed over the years on each of the issues.
+
+```{r plot-yearly-yes-issue, fig.width=10, warning=FALSE, fig.cap="Figure 2: Plots of UN voting records for the United States and China on the following 6 issues over time: arms control, colonialism, economic development, human rights, nuclear weapons, and Palestinian conflict. The lines on the plot show that China consistently votes yes at a much higher rate than the United States."}
+un.compare <- un_votes %>%
+  filter(country %in% c("United States", "China")) %>%
+  inner_join(un_roll_calls, by = "rcid") %>%
+  inner_join(un_roll_call_issues, by = "rcid") %>%
+  group_by(country, Year = year(date), issue) %>%
+  summarize(votes = n(),
+            percent_yes = mean(vote == "yes")) %>%
+  filter(votes > 5)    # Only use records where there are more than 5 votes
+
+ggplot(un.compare, aes(x = Year, y = percent_yes, color = country)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  facet_wrap(~ issue) +
+  ylab("% of votes that are 'Yes'")
+```
+
+
+## Now it's your turn!!!
+
+### Part 0
+
+Change the line at the top of this file labeled "author:" to match your name and those of your teammates.
+
+### Part 1
+
+Pick two other countries (the full list is below) besides the *United States of America* and *China*. Write in which two countries you chose and why you picked them. 
+
+Australia and United Kingdom. They are bigger countries and most likely will have a bigger influence on world issues.
+
+### Part 2
+
+Edit the code in the "Comparison of two countries" part of this document to do the following:
+
+* Compare the two countries you chose
+* Filter the data such that it is only plotted if:
+    - there was more than 10 votes
+    - The `Year` is after the year 2000
+
+
+```{r plot-yearly-yes-issue-part2, fig.width=10, warning=FALSE}
+un.compare <- un_votes %>%
+  filter(country %in% c("Australia", "United Kingdom")) %>%
+  inner_join(un_roll_calls, by = "rcid") %>%
+  inner_join(un_roll_call_issues, by = "rcid") %>%
+  group_by(country, Year = year(date), issue) %>%
+  summarize(votes = n(),
+            percent_yes = mean(vote == "yes")) %>%
+  filter(votes > 10, Year > 2000) # Only use records where there are more than 10 votes. Only use records where date is past 2000
+
+ggplot(un.compare, aes(x = Year, y = percent_yes, color = country)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  facet_wrap(~ issue) +
+  ylab("% of votes that are 'Yes'")
+```
+
+### Part 3
+
+Compare contrast the two countries you chose. Does anything seem surprising in their voting tendencies? Discuss!
+
+All of the votes are very similar and have a direct correlation besides the Palestinian conflict. We can see that Australia's votes sways from the United Kingdoms.
+
+### Part 4
+
+*Knit* the document once more and submit the *html* file through the canvas site.
+
+
+## References
+
+1. David Robinson (2017). unvotes: United Nations General Assembly Voting Data. R package version 0.2.0. https://CRAN.R-project.org/package=unvotes.
+2. Erik Voeten "Data and Analyses of Voting in the UN General Assembly" Routledge Handbook of International Organization, edited by Bob Reinalda (published May 27, 2013).
+3. Much of the analysis has been modeled on the examples presented in the [unvotes package vignette](https://cran.r-project.org/web/packages/unvotes/vignettes/unvotes.html).
+
+## Appendix
+
+Below is a list of countries in the dataset:
+
+```{r}
+un_votes %>% 
+  arrange(country) %>% 
+  select(country) %>%
+  distinct() %>%
+  as.data.frame()
+```
+
+
+
+

@@ -1,0 +1,226 @@
+---
+title: "STA 363 HW7"
+author: "Ethan Gutknecht"
+date: "12/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Set
+
+This data set was analyzed in [Muggeo and Ferrara (2008)](https://ideas.repec.org/a/eee/csdana/v52y2008i5p2529-2537.html "Muggeo and Ferrara (2008)"). It contains information from 683 production workers, and it recorded the following variables: 
+
+ 
+* `kwit`	-- *"binary outcome, with value of 1 indicating if the worker quits within six months of starting a new job, 0 otherwise"*
+* `y`	-- *"numerical observed standardized physical productivity measure for the worker after the initial training period"*  
+* `sex`	-- *"a dummy variable for the workers’ sex, 0=female, 1=male"*
+* `dex`	-- *"a score on a physical dexterity exam administered before the worker was hired"*
+* `lex`	-- *"the number of years of education of the worker"*
+* `job_tenure`	-- *"actual duration of employment"*
+* `censored`	-- *"censoring indicator, if the censoring indicator is 0 then the corresponding duration is censored, i.e., they are observed by the end of the observation time period, but they entered the company less than 6 months by then."*
+
+```{r, message=F,warning=FALSE}
+library(tidyverse)
+library(GGally)
+library(ggfortify)
+library(leaps)
+library(car)
+library(tidymodels)
+library(knitr)
+library(gridExtra)
+library(lindia)
+library(leaps)
+library(car)
+library(caret)
+library(kableExtra)
+
+
+dat1  = read.table("http://www.econ.uiuc.edu/~roger/courses/471/data/weco.dat",header = TRUE)
+
+
+```
+ 
+
+## Part 1: Odds 
+ 
+#### Question 1: Data filtering is done in the following step. What does it do?  (1 pt)
+
+```{r}
+dat2<-dat1%>%
+  filter(censored==1)
+```
+
+**What this does is create a new data frame object called dat2. This dataframe object will have all entries of data that have censored equal to one. All the people in this data set now have worked there over 6 months**
+
+
+
+
+
+### **Using the updated data set *`dat2`* to answer the following questions:**
+
+#### Question 2: Compute the odds that a worker quits within six months of starting a new job. (2 pts)
+```{r}
+xtabs(~ kwit, data=dat2)
+
+(153 / 683)
+```
+**There is a 0.224 odds that a person will quit his job within six months of working there.**
+
+
+
+#### Question 3: Does the odds of a worker quits within six months of starting a new job vary by gender? Compute the odds that a worker quits within six months of starting a new job for each gender group. Compare these values to address the question. (3pts)
+```{r}
+# Get us the results  (Y-AXIS: KWIT, X-AXIS: SEX)
+xtabs(~ kwit + sex, data=dat2)
+
+# Males (1):
+(101/228)
+
+# Females (0):
+(52/172)
+
+```
+**There is a difference between the two ratios. Males have a ratio of 0.443 and females have a ratio of 0.302. There is higher odds that a male will leave his job within six months compared to a female.**
+
+
+
+## Part 2: Simple Logistic Regression
+
+#### Question 4: Build one or more plots to explore how *`dex`* predicts whether a worker quits within six months of starting a new job. Briefly discuss the results of your plot(s). (4pts)
+```{r}
+# Create model
+linearReg <- lm(kwit ~ dex, data=dat2)
+summary(linearReg)
+
+# Graph
+ggplot(dat2) + 
+  geom_density(aes(kwit, fill=dex), alpha=0.2)+
+  labs(x="Leaving Job After 6 Months (No-Yes)", 
+       title="Score of DEX Exam and Leaving Work After 6 Months") +
+  theme_classic()
+```
+**It seems like there is a higher density of people that dont leave their job after six months when using the DEX exam as a predictor.**
+
+
+
+#### Question 5: Build a simple logistic model to statistically determine if the *`dex`* predicts the probability that a worker quits within six months of starting a new job. Support your findings with an appropriate hypothesis test. (4pts)
+```{r}
+# Create model
+fit <- glm(kwit ~ dex, data=dat2, family=binomial(link=logit))
+summary(fit)
+
+# Hypothesis Test
+null.fit <- glm(kwit ~ 1, data=dat2, family=binomial(link=logit))
+anova(null.fit, fit, test="LRT")
+```
+**Based on our model it seems that the DEX score predicts if a person will stay over 6 months. Our LRT hypothesis test correctly supports this claim.**
+
+
+
+## Part 3: Multiple Logistic Regression Models
+
+#### Question 6: Fit a multiple logistic regression model with `y`, `sex`, `dex` and `lex` to predict the probability that a worker quits within six months of starting a new job. Conduct an appropriate test to determine whether this model significantly predicts the probability that a worker quits within six months of starting a new job. (4pts)
+```{r}
+# Multiple Regression
+MR.fit <- glm(kwit ~ y + sex + dex + lex, data=dat2, family=binomial(link=logit))
+MR.null.fit <- glm(kwit ~ 1, data=dat2, family=binomial(link=logit))
+
+# Get results
+anova(MR.null.fit, MR.fit, test="LRT")
+summary(MR.fit)
+```
+**This model is significant because the P value for the model is below 0.05. But there are predictor variables that are not significant.**
+
+ 
+ 
+ 
+#### Question 7: Are there predictors that are not significant in the model from Question 6? If so, please create a new model by removing this(these) variable(s) from the model from Question 6, and compare the updated model vs. the model from Questions 6, using a reduced model test. (4pts)
+```{r}
+# Multiple Regression
+MR.fit.2 <- glm(kwit ~ sex + dex, data=dat2, family=binomial(link=logit))
+
+# Get results
+anova(MR.fit.2, MR.fit, test="LRT")
+```
+**The two models are different since the P-value is over 0.05**
+
+
+
+
+#### Question 8:  The starter file contains some code to help you along on this problem. Build a table to compare the AIC, BIC and a Pseudo-R-squared for the models fit in questions 5, 6 and 7. Which model is best with respect to each metric? (4pts)
+
+```{r}
+# Simple Linear
+glance(fit) %>%
+  mutate(Pseudo_Rsquared = (null.deviance-deviance)/null.deviance*100)
+
+# Full Model
+glance(MR.fit) %>%
+  mutate(Pseudo_Rsquared = (null.deviance-deviance)/null.deviance*100)
+          
+# Reduced Model
+glance(MR.fit.2) %>%
+  mutate(Pseudo_Rsquared = (null.deviance-deviance)/null.deviance*100)
+
+```
+**The reduced model (the third one) is the best out of three since they have the lowest AIC and BIC values.**
+
+
+
+#### Question 9: Code was supplied for a Pseudo-R-squared calculation in question 8. Explain how this value mimics that of the traditional R-squared value used in multiple linear regression. (4pts)
+
+**This value looks at the predictor error compared to the variance in response. This value will help predict the unexplained variance in the data.**
+
+
+#### Question 10: For the model with the best BIC, of those fit in questions 5, 6, or 7, interpret the coefficient associated with `sex`. Be sure to explain this coefficient in terms of odds (not log-odds, which do not provide a nice interpretation).  How does this compare to the results in question 3? Why might they be similar/different? (4pts)
+```{r}
+# Get Summary
+summary(MR.fit.2)
+```
+
+**Since the coefficient is 0.6307 and not negative, it means that as a male you are getting a higher chance to leave your job within six months. This reflects what we said in question three.**
+
+
+
+
+## Part 4: Prediction
+
+#### Question 11: We will use three fitted models built above to predict whether a worker quits within six months of starting a new job for those censored observations. Some code is supplied below, edit and replicate so it will make predictions using all three models. Please plot the three sets of predicted probability that a worker quits within six months of starting a new job on the y coordinates and the physical dexterity scores for those censored observations. (4pts)
+
+#### Answer
+
+```{r}
+dat_test <- dat1 %>%
+    filter(censored==0)
+
+# Simple Linear
+dat_test<-dat_test%>%
+  mutate(kwit.predict.1 = predict(fit, newdata=dat_test,
+                            type="response"))
+
+# Full Model
+dat_test<-dat_test%>%
+  mutate(kwit.predict.2 = predict(MR.fit, newdata=dat_test,
+                            type="response"))
+
+# Reduced model
+dat_test<-dat_test%>%
+  mutate(kwit.predict.3 = predict(MR.fit.2, newdata=dat_test,
+                            type="response"))
+```
+
+
+#### Question 12: Please predict the probability for a female work to quit within 6 months given her *`y`=13*, *`dex=40`*, *`lex=10`* using your model from Questions 6. (2pts) 
+
+```{r}
+predict(MR.fit.2, newdata=data.frame(sex=0, y=13, dex=40, lex=10), type="response")
+```
+**The probability that this woman quits her job in the next six months is 0.2672.**
+
+
+
+
+

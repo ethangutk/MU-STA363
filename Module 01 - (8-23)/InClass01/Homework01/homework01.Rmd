@@ -1,0 +1,28 @@
+---
+title: "Homework01"
+author: "Ethan Gutknecht"
+date: "8/29/2021"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Loading all the required packages.
+
+```{r load-packages, warning=FALSE, message=FALSE}
+library(unvotes)
+library(tidyverse)
+library(lubridate)
+```
+
+## Second code snipit
+
+```{r date}
+date()
+Sys.info()
+sessionInfo() 
+```

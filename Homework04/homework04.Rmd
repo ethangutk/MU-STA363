@@ -1,0 +1,145 @@
+---
+title: "Homework04"
+author: "Ethan Gutknecht"
+date: "10/11/2021"
+output: html_document
+---
+
+```{r, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(GGally)
+library(lindia)
+library(ggfortify)
+```
+
+
+-------
+
+-------
+
+-------
+
+-------
+
+## Complete the following steps to conduct an analysis of the rice data.
+
+
+#### 1. Read in the data and remove any columns from the data set that are not needed for the model. *(2pts)*
+```{r}
+# Read the TXT file into an object
+rice_original <- read.table("rice.txt", header = TRUE)
+
+rice_1 <- rice_original %>% select(adhesiveness, moistureContent, amyloseContent, proteinContent, waterAbsorption, swellingRatio, pH, solidsContent)
+
+head(rice_1)
+```
+
+-------
+
+#### 2. Construct a scatterplot matrix of all variables. Describe any discernible patterns you see. *(2pts)*
+```{r}
+ggpairs(rice_1,
+        lower = list(continuous = wrap("points", alpha=0.15, size=0.95)),
+        upper = list(continuous = wrap("cor", color="black") ) ) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank() )
+```
+We can see that each graph has a sharp increase with it being offset to the left or right. No correlation is over 0.6 with many of the correlations being under 0.3. 
+
+-------
+
+#### 3. Fit the multiple regression modeling the adhesiveness as a function of moisture content, amylose content, protein content, water absorption, swelling ratio, pH, and solids content. *(2pts)*
+```{r}
+rice_lm_1 <- lm(abs(adhesiveness) ~ moistureContent + amyloseContent + proteinContent + waterAbsorption + swellingRatio + pH + solidsContent, data=rice_1)
+summary(rice_lm_1)
+```
+
+-------
+
+#### 4. Perform a residual analysis of the fitted model. Do you see any concerns regarding the assumptions we make in linear regression? *(2pts)*
+```{r}
+# Check assumptions
+autoplot(rice_lm_1)
+```
+The Q-Q plot starts to trend upwards towards the end of the data points aswell as the residuals vs fitted plot seems to not be very uniform aswell.
+
+-------
+
+#### 5. Construct a Box-Cox transformation plot to the fitted model in Part 3, what is the optimal λ suggested? (Hint: adhesiveness values are all negative, and a Box-Cox plot only works for positive data. What can you do to make this plot work?) What type of transformation does this plot suggest? What other transformations are viable? *(2pts)*
+```{r}
+# Construct box cox
+gg_boxcox(rice_lm_1)
+```
+This box cox plot suggests that we should square our data by -0.6. We would also have to take the absolute value of the data before we squared to make it positive.
+
+-------
+
+#### 6. Fit a multiple regression model using the transformation of adhesiveness chosen in Part 5 as a function of moisture content, amylose content, protein content, water absorption, swelling ratio, pH, and solids content. *(2pts)*
+```{r}
+# Create new lm model with log data
+rice_lm_2 <- lm( abs(adhesiveness) ^ -0.6 ~ moistureContent + amyloseContent + proteinContent + waterAbsorption + swellingRatio + pH + solidsContent, data=rice_1)
+```
+
+-------
+
+#### 7. Perform a residual analysis of the fitted model in part 6. Does it appear that the transformation has improved the residuals plots? *(2pts)*
+```{r}
+# Check assumptions
+autoplot(rice_lm_2)
+summary(rice_lm_2)
+```
+Yes, since the redidual vs fitted is linear and centered aswell as the Q-Q plot is more concise, we can see that it fits the assumptions better than our original plot.
+
+-------
+
+#### 8. Interpret the intercept term for the fitted model from part 6.  Does it contextually make any sense? *(2pts)*
+
+The intercept for our regression line is 0.035. This makes sense as if we had no other factors effecting the rice it would not be very adhesive.
+
+
+-------
+
+#### 9. Compare the transformed model in Part 6 to the original model in Part 3. Does this transformation change your results? Which model would you choose and why? *(2pts)*
+
+Our first unmodified graph has a more curved residuals vs fitted plot and after doing some modifications, it is very linear. Aswell as this, the modified model is better since our Q-Q plot has points that are closer to the line.
+
+
+-------
+
+#### 10. Interpret the slope coefficient for amylose content from your chosen model in Part 9. *(2pts)*
+
+With every other coefficient held constant, with every 1 unit increase of adhesiveness, the amylose content will be estimated to increase 3.244 units.
+
+-------
+
+#### 11. Does the model chosen in part 9 significantly predict the adhesiveness (or the transformation of the adhesiveness) of the rice?  If so, what percentage of the variability in the adhesiveness (or the transformation) is explained by the fitted model? *(3pts)*
+The model chosen in part nine significantly predicts the adhesiveness of rice based on the amylose content and the pH level. The variability of this is 42.94%.
+
+
+-------
+
+#### 12. Use your chosen model from part 9 to predict, with 95% confidence, the adhesiveness of a rice serving with the following values. Make sure to construct a prediction interval, make sure you apply any necessary transformations, and make sure to interpret the interval in context.  *(2pts)*
+* Moisture Content = 14.9
+* Amylose Content = 22.6
+* Protein Content = 8.1
+* Water Absorption = 211
+* Swelling Ratio = 225
+* pH = 6.6
+* Solids Content = 5.2
+
+```{r}
+rice_predict <- data.frame(moistureContent  = 14.9,
+                           amyloseContent  = 22.6,
+                           proteinContent  = 8.1,
+                           waterAbsorption = 211,
+                           swellingRatio  = 225,
+                           pH =  6.6,
+                           solidsContent = 5.2)
+
+predict(rice_lm_2, rice_predict, interval="pred")
+```
+
+After the transformation and using the values above we can see that we are 95% confident that the adhesiveness will be between 0.0126 and 0.0936.
+
