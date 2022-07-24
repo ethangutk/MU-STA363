@@ -1,0 +1,297 @@
+---
+title: "Class 09: Repeated Measures Designs"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(emmeans)
+options(dplyr.summarise.inform=FALSE)
+```
+
+
+## Repeated Measures
+
+Sometimes for reasons of economy or necessity, an experiment is conducted where we actually measure the *same* experimental unit repeatedly over time, or design the experiment so that we apply **every** treatment to each individual experimental unit over the course of the experiment.  This practice fundamentally changes how variability among responses behaves, and thus changes the way in which we must perform an ANOVA.
+
+**Example.**  An experiment was conducted at the University of Texas at Austin to determine how diet and exercise affect the pulse rate of human subjects. Eighteen subjects were randomly assigned to one of three **exercise routines** (1 = aerobic stair climbing, 2 = racquetball, 3 = weight training) and one of two **diets** (1 = include meat, 2 = vegetarian). After a training period where all subjects followed their assigned exercise regimens and diet routines, their pulse rates were measured at three consecutive times (once after a warm-up, again after jogging and finally after running). 
+
+Let's read in the data first (a bit later, we'll do some of the standard data processing as before when starting an analysis):
+
+```{r}
+pulse <- read.csv("pulseRepMeasures.csv")
+kable(head(pulse))
+```
+
+While the above looks fine, sorting the data by `Subject` emphasizes the fact that `Time` is a factor whose levels can change within an experimental unit (i.e., person):
+
+```{r}
+pulse <- pulse %>%
+  arrange(Subject)
+kable(head(pulse))
+```
+
+There are three measured pulse rates for each subject over time.  Since any effects of `Diet` and/or `Exercise` are only observed over time, this makes `Time` a factor whose levels vary **within a subject** ... i.e., `Time` is a **within-subjects factor**, or also known as a **repeated-measures** factor.
+
+**Why is this important to distinguish from a between-subjects factor?**  When a factor only varies within a subject, there is typically less random noise or variation in the measurements across this factor because of the consistency introduced by measuring the same EU repeatedly (you may be an EU, you are fairly consistent and homogenous compared to yourself!).  Ignoring this fact may erroneously make the analysis believe that random variation in the process is smaller than it truly is, leading to overly optimistic findings when comparing treatments.
+
+### EDA
+
+Now, some of the usual data prep before analysis:
+
+* We make sure the levels of `Time` are in the proper order
+* Attach meaningful labels to the factor levels of `Exercise` and `Diet`
+* Subject is just an ID corresponding to each participant (experimental unit)
+
+```{r}
+pulse <- pulse %>%
+  mutate(Subject = as.factor(Subject),
+         Exercise = factor(Exercise, labels=c("Aerobic Stair Climbing", "Racquetball", "Weight Training")),
+         Diet = factor(Diet, labels=c("Includes Meat", "Vegetarian")),
+         Time = factor(Time, levels=c("WarmUp", "AfterJogging", "AfterRunning")))
+```
+
+Because of the longitudinal nature of the response (being measured repeatedly on the same EUs over time), a good data visualization should reflect this aspect of the data.  **Response profiles** over `Time` are a good way to do this:
+
+```{r}
+ggplot(pulse) + 
+  geom_line(aes(x=Time, y=Pulse, color=Exercise, linetype=Diet, group=Subject))
+```
+
+We use different color and line styles to visually compare the different diets and exercise regimens.  But, the above display is a bit "busy", so **faceting the display** by `Diet` can help improve legibility:
+
+```{r}
+ggplot(pulse) + 
+    geom_line(aes(x=Time, y=Pulse, color=Exercise, group=Subject)) + 
+  facet_wrap(~Diet)
+```
+
+**What appears to going on, based on the plots?**  Pulse rates appear higher in Diet 1, regardless of Time (i.e. type of activity).  There is no clear separation in pulse rates due to exercise regimen.
+
+**Alternative profile plot.** Consider profile plots that are faceted by type of exercise instead of diet.  Does the same story appear to told in this different data visualization of the same data?
+
+```{r}
+ggplot(pulse) + 
+    geom_line(aes(x=Time, y=Pulse, color=Diet, group=Subject)) + 
+    theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  facet_wrap(~Exercise)
+```
+
+
+### Analysis
+
+Now let's proceed to an ANOVA analysis of this repeated measures experiment.  Before starting, we must articulate the **study goals** so we know how to address them via fitting a model to the data. 
+
+First, recognize that the effect of the different diets and exercise regimens **would only be revealed over time.**  This means that we should compare how different treatments (i.e. different diet/exercise combinations) would affect mean pulse rates differently *over time*. Stated another way, we ask: **Does the effect of different treatments on mean pulse rate change depending on the time of measurement?**  That is what an **interaction test** between `Time` and the treatments (`Diet` and `Exercise` combinations) would address!
+
+To fit the model to accommodate this, the appropriate R code is as follows:
+
+```{r, eval=FALSE}
+pulse.anova <- aov(Pulse ~ Diet*Exercise*Time + Error(Subject/Time), data=pulse)
+```
+
+The command above fits a repeated measures ANOVA as follows:
+
+* `Pulse` is the response variable
+* The factors `Diet`, `Exercise`, and `Time` are all observed in combination, so there are three factors in the study.  We will observe all the potential interactions (**even the three-way interaction -- that's the first one we will test**).
+* The `Error(Subject/Time)` piece tells R that `Time` is a **within-subjects (repeated) factor**, and thus will handle the random error components appropriately for the analysis.
+
+So here goes:
+
+```{r}
+pulse.anova <- aov(Pulse ~ Diet*Exercise*Time + Error(Subject/Time), data=pulse)
+summary(pulse.anova)
+```
+
+#### Interpretation
+
+The first thing to look at is the **highest order interaction** (labeled `Diet:Exercise:Time`). This test essentially addresses if the Diet/Exercise combinations affect pulse rate differently as time goes by (i.e., as the activity becomes more strenuous).  We see that this effect is not significant ($F$-stat = 1.850 on 4 and 24 degrees of freedom, $p$-value = 0.1523).  Because of this insignificance, we can safely look at the lower-order interactive effects to see where (or *if*) there is evidence of differences in pulse rates:
+
+* `Exercise:Time`: The effect of different exercise regimens (regardless of diet!) does **not** significantly affect pulse rates  as time goes along (i.e. as the activity becomes more strenuous) ($F$-stat = 0.302 on 4 and 24 degrees of freedom, $p$-value = 0.8740).
+* `Diet:Time`: The effect of different diets (regardless of exercise regimen!) does **not** significantly affect pulse rates as time goes along (i.e. as the activity becomes more strenuous) ($F$-stat = 2.583 on 2 and 24 degrees of freedom, $p$-value = 0.0964).
+* `Diet:Exercise`: The effect of different diet/exercise combinations (averaged across `Time`: i.e. regardless of activity) does **not** significantly affect pulse rates ($F$-stat = 0.351 on 2 and 12 degrees of freedom, $p$-value = 0.7113).
+
+This basically addresses the research goals.  However, we can make some broader generalizations about these factors under study.   Since none of the two-factor interactions are significant, we can break up the effects of the individual factors and look at them each in isolation.  Remember from last week that these are called **main effects**, and are only meaningful to look at if they are not involved in any interactions with other factors:
+
+* `Diet`: The effect of different diets (regardless of time or exercise regimen!) **significantly affects** pulse rates ($F$-stat = 8.577 on 1 and 12 degrees of freedom, $p$-value = 0.0126).
+* `Exercise`: The effect of different exercise regimens (regardless of time or diet!) does **not** significantly affect pulse rates ($F$-stat = 0.761 on 2 and 12 degrees of freedom, $p$-value = 0.4884).
+* `Time`: The effect of different times (i.e. the different levels of strenuous activity), regardless of diet or exercise regimen, **significantly affects** pulse rates ($F$-stat = 703.716 on 2 and 24 degrees of freedom, $p$-value < 0.0001) **...well, duh, of course!!!**
+
+#### Synopsis of findings
+
+So, the only meaningful effect we have discovered here is due to `Diet`.  The different diets significantly affect the true mean pulse rate, regardless of exercise regiment or type of physical activity.
+
+You might ask why we don't perform any multiple comparisons here for the `Diet` effect on pulse rates.  **Well, it is unnecessary!**  There are only two diets -- there are no **multiple** comparisons, only one! And we know they are different!
+
+#### Assumption checking
+
+Due to the lack of independence in our responses (the within factor structure), checking the underlying assumptions (Normality, constant error variance, independence between factors) is a complex task and is outside the scope of this course. Contact a statistician if needed.
+
+-------
+
+A visual display of the `Diet` effect (aggregated over the exercise regimens, since those don't make a significant difference) can display the result graphically:
+
+```{r}
+# Create a summary dataset of means/SEs of pulse rates by Diet and Time
+pulse.summary <- pulse %>%
+  group_by(Diet, Time) %>%
+  summarise(Mean = mean(Pulse),
+            SE = sd(Pulse)/sqrt(length(Pulse)))
+
+# We include a position_dodge() so the error bars does not overlap
+ggplot(pulse.summary, aes(x=Time, y=Mean, colour=Diet)) + 
+  geom_errorbar(aes(ymin=Mean-SE, ymax=Mean+SE), width=.1, position=position_dodge(0.3)) +
+  geom_line(aes(group=Diet), position=position_dodge(0.3)) +
+  geom_point(position=position_dodge(0.3)) +
+  xlab("Time (Activity)") +
+  ylab("Pulse Rate") +
+  ggtitle("Mean Pulse Rates (with Standard Error bars)")
+```
+
+**Note about the plot:** We are making a plot based on a different dataset we created, an aggregate dataset! This new dataset consist of the Diet type, Time and mean and standard deviation of pulse rates. The plot essentially provides the average profile (with error bars) by Diet in Time. Below is the summary data we just plotted (this is only included for explanation).
+
+```{r}
+kable(pulse.summary)
+```
+
+
+#### Finally ...
+
+**We can write a single sentence in context** (based on the ANOVA results and the plot) that describes the results of the analysis.
+
+A vegetarian diet results in a significantly lower mean pulse rate, regardless of the type of exercise regimen employed or the strenuousness of the activity being done.
+
+
+
+## In-class Assignment: Alcohol and Reaction Time
+
+A study was conducted to determine the effects of alcohol on human reaction times. Fifty-seven individuals were recruited for this study and were randomly allocated into one of three alcohol treatment groups -- a **control** where the subjects remain sober during the entire study, a **moderate** group were the subject is supplied alcohol but is limited in such a way that their blood alcohol content remains under the legal limit to drive (BAC of 0.08) and a group that received a **high** amount of alcohol to which their BAC may exceed the legal limit for driving. Each subject was trained on a video game system and their reaction time (in milliseconds) to a visual stimulus was recorded at 7 time points 30 minutes apart (labeled T0=0, T1=30, T2=60 and so on). At time point T0, all subjects were sober and those in one of the alcohol consumption groups began drinking after the first measured reaction time (controlled within the specifications outlined). It is also of interest to the researcher if a subjects age influences reaction time (namely, is reaction time different for those in the 20s versus 30s).
+
+The task for today is to do a complete analysis for this study and dig into the effects that alcohol, age and time have on mean reaction times.
+
+----------------
+
+## Data input and processing
+
+First read in the data and peek at the first 6 rows:
+
+```{r}
+alcohol <- read.csv("alcoholReaction.csv")
+head(alcohol)
+```
+
+Note the following:
+
+* The `Age` variable is recorded as an actual numeric age in years, not as categories of 20s or 30s like we want.  So, we will need to dichotomize this variable. 
+* Also note the data is in *wide* format -- the reaction times (the response variables) are spread over multiple time-sepcific columns. We need a way to *pivot* these columns into a single column. 
+
+So, we need to do some data processing.  First, consider the below code:
+```{r}
+alcohol <- alcohol %>% 
+       mutate(Age = case_when(Age < 31 ~ "20s",
+                              Age %in% 31:40 ~ "30s"))
+head(alcohol)
+```
+
+`case_when` is essentially a piece-wise comparison. When `Age` is less than 31, you overwrite the `Age` variable with `20s`. If `Age` is in the integers from 31 to 40, you replace the value with `30s`. In this example we used both a `<` comparison and the `%in%` statement we've seen before just to show multiple functionality.
+
+### Problem 1: Save the dichotomized Age variable
+
+The code chunk above showed how to convert age to a dichotomous variable, but you will notice that it did not change Age in the original data set. 
+
+```{r}
+
+```
+
+So the `Age` variable has now been categorized. Now, we need to convert the data from *wide* to *long* format. We do this with the `pivot_longer()` function included in `tidyverse`. 
+
+### Problem 2: Convert the data from wide-to-tall format
+
+```{r}
+ alcohol.long <- alcohol %>%
+   pivot_longer(cols=c(T0, T1, T2, T3, T4, T5, T6), names_to="Time", values_to = "Reaction")
+```
+
+**Recall about pivot_longer().** There are essentially three input arguments into the `pivot_longer()` function:
+
+* *First:* a vector of all the columns we want to pivot across -- in this case, T0, T1, T2, T3, T4, T5, and T6.
+* *Second:* `names_to` - creates the name of a *new* variable whose values will correspond to the original names of the pivoted columns
+* *Third:* `values_to` - creates and names a *new* variable that will house the values originally stored in the pivoted columns
+
+```{r}
+# peek at the pivoted data structure
+head(alcohol.long, n=12)
+```
+
+You will now note the data is now in a **long** format, which is how we need it expressed for the analysis.
+
+Lastly, so that R doesn't try and treat it as a number, we tell it that the `Subject` variable is a factor (or categorical) variable. We also want to make sure that the factor levels for `Alcohol` are in the order that makes the best sense. 
+
+### Problem 3: Edit the `alcohol.long` dataset so that the `Subject` variable is treated as a factor, and so that the factor levels in the `Alcohol` varaible are in an logical order (Control, Moderate, High)
+
+```{r}
+alcohol.long <- alcohol.long %>% mutate(Subject=as.factor(Subject),
+                                        Alcohol=factor(Alcohol, levels=c("Control", "Moderate", "High") ) )
+head(alcohol.long)
+```
+
+### Exploratory Data Analysis
+
+There are 2 categories for age, 3 categories for alcohol use and then 7 time points to consider. Essentially $2\times 3\times 7 = 42$ combinations to consider. Rather than look numerically we will consider things graphically.
+
+First we consider a plot of the Reaction times in Time based on Alcohol treatment with Age determining the linetype.
+
+The following code chunk creates a profiles plot of the data. 
+
+```{r, eval=TRUE}
+# Change eval to TRUE to see this plot in the knitted file
+ggplot(alcohol.long) + 
+  geom_line(aes(x=Time, y=Reaction, group=Subject, color=Alcohol, linetype=Age))
+```
+
+With multiple colors and line types, as well as grouping by subject, this plot is crowded with lines. Not only is this plot cluttered, it is hard to determine anything informative.  
+
+### Problem 4: (Open-ended) In the code chunk below, edit the plot I made above to make it easier to interpret. What ways can you fix the problems with the previous plot?
+
+```{r}
+ggplot(alcohol.long) + 
+    geom_line(aes(x=Time, y=Reaction, color=Age, group=Subject)) + 
+    theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  facet_wrap(~Alcohol)
+```
+
+**We can see that people in their thirties have a less variety in reaction time compared to people in their twenties when they have consumed a high amount of alcohol. Overall, the graphs are pretty difficult to read.**
+
+
+## Model fitting and analysis
+
+Below is the code to fit the repeated measures ANOVA model to the data:
+
+```{r, eval=TRUE}
+# Need to set eval to TRUE when you get here!
+fit <- aov(Reaction ~ Age*Alcohol*Time + Error(Subject/Time), data=alcohol.long)
+```
+
+*(Remember: you are <b>not</b> required to check assumptions using `autoplot` here due to the complexity of repeated measures assumption checking).*
+
+### Problem 5: Show the ANOVA table output from this model. What are your conclusions based on these results? (Be specific, citing the test statistics used.)
+
+```{r}
+summary(fit)
+```
+
+*We can see that the Alcohol:Time has a P-value of 0.00145. Since this is the highest level, we will use this to perform a multiple compairsons test.*
+
+
+### Problem 6: If necessary, conduct the appropriate multiple comparisons procedure. Briefly summarize the results.
+
+```{r message=FALSE}
+Dunnett.Alcohol <- emmeans(fit, ~ Alcohol | Time)
+contrast(Dunnett.Alcohol, "trt.vs.ctrl", ref=1)
+```
+
+*We can see that the p-value of comparing the control and high level alcohol level consumption after 3 hours brings a significant difference in results.*
+

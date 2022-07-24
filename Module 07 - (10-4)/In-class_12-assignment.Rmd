@@ -1,0 +1,267 @@
+---
+title: "In-Class 12 Assignment"
+author: "Name here"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(lindia)
+library(ggfortify)
+library(GGally)
+```
+
+## Data Description
+
+Data was collected from the 2019 United States Census Bureau American Community Survey (ACS), the 2017 FBI Uniform Crime Reporting database (UCR), the 2017 US Department of Agriculture farming Census, results from the 2020 general election, Unemployment numbers from the Bureau of Labor Statistics, Mask wearing survey data from the New York Times and COVID-19 Coronavirus cases and deaths (from USA  Facts, a not-for-profit nonpartisan civic initiative providing government data) for each county/parrish in the United States and Washington, D.C. The combined data includes the following variables
+
+
+* `countyFIPS` - The five character numeric FIPS code uniquely identifying the county
+* `CountyName` - The name of the county/parrish
+* `State` - The two character abbreviation for the State
+* `stateFIPS` - The two character numeric FIPS code uniquely identifying each state
+* `Area` - The geographic area of the county, in squared miles
+* `Total_cases` - The total number of COVID-19 cases reported for the county as of DATE
+* `Total_deaths` - The total number of COVID-19 related deaths reported for the county as of DATE
+* `pop` - The estimated population for the county in the year 2019
+* `age` - The median age of county residents, estimated in the year 2019
+* `income` - The median household income within the county, estimated in 2019
+* `PercCitizens` - The percentage of residents in the county that are US citizens, estimated in 2019
+* `PercCollege` - The percentage of residents in the county with a college degree (Associates or higher), estimated in 2019
+* `PercVets` - The percentage of residents in the county that are veterans of the US armed forces, estimated in 2019
+* `PercHealth` - The percentage of residents in the county that has some form of health insurance (including Medicare and Medicaid), estimated in 2019
+* `per_gop` - The proportion of residents in the county that voted for President Donald Trump in 2020
+* `per_dem` - The proportion of residents in the county that voted for President Joe Biden in 2020
+* `Unemployment_rate` - The estimated county-level unemployment rate in November 2020 (seasonally unadjusted)
+* `HighMaskUsage` - An estimate of the proportion of county residents who "always" or "mostly always" wear a mask while in public, based on a New York Times Survey in September 2020.
+* `Corn` - The amount of Corn harvested in the county, in acres, according to the 2017 USDA census
+* `Soy` - The amount of Soybeans harvested in the county, in acres, according to the 2017 USDA census
+* `Vegetables` - The amount of Vegetables (Broccoli, Beans, etc…) harvested in the county, in acres, according to the 2017 USDA census
+* `officers_killed_by_felony` - The number of police officers killed during the course of felony in 2018
+* `officers_assaulted` - The number of police officers assaulted during the course of their jobs in 2018
+* `violent_crime` - The total number of recorded violent crimes in 2018
+* `property_crime` - The total number of property crimes in 2018
+
+Note: FIPS is the Federal Information Processing Standards mechanism for uniquely identifying states, counties and other regions.
+
+## Goals for this assignment
+
+#### Statistical Goals
+
+The assignment for today is designed to give you practice at performing inference on linear regression models. We will also be reviewing material covered in Module 05 as well. 
+
+In particular, today we will perform an overall ANOVA $F$-test for regression, look at the marginal $t$-test for specific coefficients, and interpret the adjusted $R^2$ for a fitted model.
+
+This assignment also is designed to provide insight into the issue of confounding variables and stress an underlying message that **correlation is NOT causation**. 
+
+#### Contextual Goals
+
+We will look at building a model to help explain Coronavirus-related death rates across the contiguous United States. 
+Please note that in STA 363 we attempt to use real and relevant datasets as much as possible. One of the main ideas from today is that a linear model from observational data does NOT lead to *causal* arguments about what variables cause more Coronavirus deaths, nor should any results today lead to broad conclusions about policy, politics, health or safety. 
+We are only using a few of the variables in this large data set and, like more real-world problems, the current situation is more complicated than the data provided. This data includes the latest Coronavirus counts as 7 November 2020 from the USA Facts website.
+
+
+
+## Part 1 - Preliminary Data Wrangling
+
+The below code chunk reads in the data, removes Alaska and Hawaii (we are only working with the contiguous United States) and saves it as `county_data`. It also reports the proportion of counties with 0 deaths and 0 cases.
+
+```{r, warning=FALSE, message=FALSE}
+county_data <- read.csv("usCountyCoronaVirusData_2020-11-07.csv") %>%
+     filter(!State %in% c("AK", "HI") )
+
+county_data %>% 
+   summarize(Proportion_county_no_cases = mean(Total_cases==0),
+             Proportion_county_no_deaths = mean(Total_deaths==0) ) %>%
+   kable()
+```
+
+You should note that a non-negligible proportion of counties in the United States have reported no coronavirus related deaths, whereas few counties have reported no cases at all.  This causes our response variable for the day, death rates in counties, to be <a href="https://en.wikipedia.org/wiki/Zero-inflated_model">*zero inflated*</a> -- modeling this sort of data is incredible important in science and society but is outside the scope of this course. In module 6 we handled the few zero cases by arbitrarily adding a constant (i.e., 1) to all the responses. Technically we could do that here, but then we would have 1-inflated data -- it would not really *fix* the underlying "inflation" problem.
+
+In the below code chunk, filter the data such that only counties with at least 1 death are retain. Note, by only working with a subset of the data,  we now have a different target population than the original sample. **Describe what the target population for the inference and analysis using this data**.
+
+
+```{r}
+# Filter out all countys that have more than 0 deaths
+county_data <- filter(county_data, Total_deaths > 0)
+```
+
+**The target population is counties that have one death or more. This population does not apply to counties that have no deaths.**
+
+
+
+
+
+## Part 2 - Prior belief
+
+For the last 12 months the world has grappled with the SARS-CoV-2 virus. Based on all that you have heard, what do you expect to happen to the Coronavirus death rate as the median age in a county increases?
+
+*NOTE: This question does not involve any data analysis, it is asking you to express the belief based on your knowledge of the pandemic.*
+
+**As the median age of the county increases, I would expect the death rate to go up as they are more vulnerable to the virus.**
+
+
+
+
+
+## Part 3 - More Data Wrangling
+
+In the below chunk, do the follwoing
+
+* Create the following variables (giving contextually meaningful variable names)
+   + The **Population Density**, defined as the Population divided by the geographic area of the county.
+   + The **Violent crime rate**, defined as the number of violent crimes per 1000 residents (violent_crimes/pop*1000).
+   + The cumulative **Coronavirus death rate**, defined as the number of Coronavirus related deaths per 1000 residents as of 07 November 2020.
+* Select the following variables for analysis
+   + Median age of the county
+   + Population density
+   + Percent of the population with a college degree
+   + Percent of residents that are Veterans of the US Armed Forces
+   + The unemployment rate for November 2020
+   + Violent crime rate
+   + The estimated proportion of county residents who always, or almost always, wear a mask in public.
+   + Coronavirus death rate
+
+Note: we already filtered to only the contiguous states in an above code chunk.
+
+```{r}
+# Add the factors needed for the data set
+county_data <- county_data %>%
+  mutate(PopulationDensity = pop/Area,
+         ViolentCrimeRate = violent_crime/pop*1000,
+         CoronavirusDeathRate = Total_deaths/pop*1000)
+```
+
+
+
+
+
+
+
+
+## Part 4 - Simple Linear Regression
+
+Fit a simple linear regression modeling the Coronavirus related death rate as a function of the median age in the county. Provide the residual diagnostic plots (i.e., `autoplot`) and assess the underlying assumptions. 
+
+```{r, warning=FALSE}
+# Create lm object
+county_data_1 <- lm(CoronavirusDeathRate ~ age, data=county_data)
+
+# Check assumptions
+autoplot(county_data_1)
+```
+
+**The data is not normally distributed as the QQ plot is very curved. Thus, all of our assumptions are not fit.**
+
+
+
+
+
+
+## Part 5 - Transformed Simple Linear Regression
+
+Fit a simple linear regression modeling the logarithm, base 10, of the Coronavirus death rate as a function of the median age in a county. Assess the underlying assumptions. 
+
+```{r}
+# Create lm object
+county_data_2 <- lm(log(CoronavirusDeathRate) ~ age, data=county_data)
+autoplot(county_data_2)
+```
+
+**With this change, the assumptions seem to fit. The data seems to be normal and the residuals vs fitted and scale location plot are linear.**
+
+
+
+
+## Part 6 - Graph and Inference
+
+Construct a scatterplot (some code to get you started is provided, note `eval=FALSE` in the Rmarkdown option) of the log10 of the Coronavirus related deaths as a function of a county's median age. Include an overlayed regression line in the plot. 
+
+Based on the plotted fitted line, what do you notice about Coronavirus death rates as a function of age?   Does this agree/disagree with your intuition in part 2? -- discuss.
+
+```{r, message=FALSE}
+# Mutate function needed
+# Mutate to create log death rate
+county_data <- county_data %>%
+  mutate(CoronavirusDeathRateLog10 = log(CoronavirusDeathRate),
+         PopulationDensityLog = log(PopulationDensity),
+         ViolentCrimeRateLog = log(ViolentCrimeRate + 1))
+
+ggplot(county_data, aes(x=age, y=CoronavirusDeathRateLog10 ) ) + 
+  geom_point(alpha=0.2) +
+  geom_smooth(method="lm", se=FALSE) +
+  labs(x="Median Age", y="County Deaths / County Population * 1000",
+       title="Scatter Plot",
+       subtitle="Median Age vs Death Rate")
+```
+
+**We can see that the majority of counties death rate is around the 30s and 40s. We can also see that based on our regression line, we can see a negative decline in death rate as the median age goes up.**
+
+
+
+
+## Part 7 - Inference
+
+Provide the `summary()` output for your fitted model in part 5 and use it to address the question: Is Age a *significant* predictor for Coronavirus death rates? What does the interpretation of the slope coefficient suggest about the rate of coronarvirus related deaths as a function of a county's median age? Relate to part 2 and the plot in part 6.
+
+
+```{r}
+summary(county_data_2)
+```
+
+**With a P value of 1.21e-7 and 1 and 2853 degrees of freedom, we can say that we have significant evidence that age alone is a factor in the death rate. We can see that in the plot from part 6 and the prediction made in part 2.**
+
+
+
+## Part 8 - Multiple Regression Model
+
+Fit a multiple regression where the log10 of the Coronavirus death rate is modeled by the county's median age, the log10 of the poulation density, the percentage of residents that are veterans, the percentage with a college degree, the log10 of the violent crime rate plus 1, the county-level unemployoment rate and and estimated proportion of county residence who always, or mostly always, wear a mask when in publish. Assess the underlying assumptions of this model.
+
+
+
+```{r}
+# Create lm object
+
+county_data_3 <- lm(CoronavirusDeathRateLog10 ~ age + PopulationDensityLog + PercVets + PercCollege + Unemployment_rate + HighMaskUsage + ViolentCrimeRateLog, data=county_data)
+summary(county_data_3)
+```
+
+**The model seems to fit all the assumptions based on our summary results.**
+
+
+
+
+## Part 9 - Inference on Part 8
+
+Answer the following questions about the model from part 8?
+
+* Is the model significant in predicting the logarithm of the Coronavirus death rate?
+* What percentage of the variability in the logarithm of the Coronavirus death rate is explained by the fitted model?
+* In this broader context, is a county's median age a significant predictor for the logarithm of the Coronavirus death rate?
+   + Interpret this coefficient in context.
+
+
+```{r}
+
+```
+
+* **15.15% SIGNIFICANT**
+* **73.72 Variance**
+* **All of the coefficients have a pvalue that is less than 0.05. Thus, there is significant evidence that they all play a roll in affecting the covid death rate per county.*
+
+
+
+
+# Part 10 - Compare and Contrast
+
+You should note that the interpretations for the median age variable in Parts 5/6/7 and 8/9 conflict. Discuss/describe why this might be the case? Do the results in part 8 agree with your intuition in part 2? 
+
+**The first test we did gave us the result of they do correlate but it did not tell us that many other factors correlate as well. Thus, doing multiple regression gives us a great idea of how many things can affect the response variable.**
+
+
+
+
+
+

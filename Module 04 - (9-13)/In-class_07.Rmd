@@ -1,0 +1,217 @@
+---
+title: "Class 07: Two-way ANOVA"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggfortify)
+library(emmeans)
+library(gridExtra)
+library(knitr)
+```
+
+
+# Two Factor ANOVA
+
+Given everything we have covered in this class, it should not be hard to extrapolate and ask the question: *What if there is more than one factor in an analysis?* For example, in the MKT Teaching evaluation data, an evaluation rating could be a function of both Instructor and class type (FSB Core vs. MKT Core vs. MKT Elective vs. Capstone). We will consider one example to demonstrate this type of analysis.
+
+## Example: Marketing Strategies
+
+A beverage manufacturer wants to test its marketing strategy for a new sales campaign for one of its soft drink products. It chooses 18 markets of approximately equivalent demographics and assigns each market at random to one of 6 marketing strategies determined by **two factors** of three and two levels, respectively. The factors are as follows:
+
+* **Promotional** price discounts (none, moderate or heavy)
+* **Advertising** for the campaign (No or Yes)
+
+The data are in the file `beverageSales.csv` in the Hughes data repository with the variable `Sales` corresponding to the change in sales from the same period 1 year ago, in cases sold per 1000 households.
+
+```{r}
+bev <- read.csv("http://users.miamioh.edu/hughesmr/sta363/beverageSales.csv")
+kable(head(bev))
+```
+
+Before we get started, we do a little data wrangling (as usual).  By default, R will list factors in alphabetical order (Heavy, followed by Moderate, and then None). We want to reverse the order, so we `mutate` the `Promotion` variable as follows:
+
+```{r}
+bev <- bev %>%
+  mutate(Promotion=factor(Promotion, levels=c("None", "Moderate", "Heavy")))
+```
+
+Describe the following:
+
+* **Experimental Units in this study?** *18 Markets*
+* **The factors of interest in this study?** *Promotional discounts and advertising*
+* **How many factor levels are there?** *Three levels of promotional discounts and two levels of advertising.*
+* **What are the treatments?** *6 Marketing strategies (every combination of promotional discounts and advertising levels.*
+* **What other steps were taken to control for nuisance variables and unexplained variability?** *Random assignments of markets, replications, similar domographic markets.*
+
+### Analysis
+
+EDA for two-factor (or higher order models) can get complex quickly. If we were to make a plot or table of the response on just one of the factors without the other, we may lose important information (we saw this with the dehumidifier data problem earlier). So we need to think hard about how to plot this data. A standard method to do so is with an **Interaction Plot**. Here we plot the mean response under each of the treatments, but use color/shape/linetype as a way to distinguish the two different factors. 
+
+In the below example, we consider the mean `Sales` Change as a function of `Promotion` type (on the *x*-axis) and `Advertising` strategy dictating the color.
+
+```{r}
+ggplot(bev, aes(x=Promotion,y=Sales, color=Advertising, group=Advertising))  + 
+  stat_summary(fun=mean, geom="point") +
+  stat_summary(fun=mean, geom="line") + 
+  labs(y="Change in Sales (cases per 1000 households") + 
+  theme_bw()
+```
+
+In the above we chose `Promotion` as the *x*-axis variable. Why not use `Advertising`?  We could -- but then we would have three color schemes on the plot with only 2 items on the *x*-axis.  In general, it is better to limit color/shape/linetype if possible.
+
+We also note something interesting in the interaction plot. The two treatments involving `None` for promotion type appear very similar (that is, `Advertising` does not appear important), but then `Advertising` has an effect with the promotion types of `Moderate` and `Heavy`. This is typically referred to as an *interaction* between the two factors. In this study, the company is ultimately interested if some **combination** of Promotion and Advertising will influence sales.  **If the effect that one factor has on the response changes depending on the level of some other factor, we must include (and test) this interaction term in our model.** We do so with the following code.
+
+```{r}
+bev.anova <- aov(Sales ~ Promotion + Advertising + Promotion:Advertising, data=bev)
+```
+
+The term `Promotion:Advertising` in the code tells R to include the interaction of `Promotion` and `Advertising` in this model (you could think of it as a third predictor variable into the model). Before considering the output, let's briefly check the residual assumptions:
+
+```{r, warning=FALSE}
+autoplot(bev.anova)
+```
+
+Overall, things generally look reasonable.  There is, however, some indication that the error variance may increase with the model's fitted values (see the little bit of a fanning effect in the *Residuals vs Fitted* plot), but for now we will overlook addressing the issue. The normality assumption looks good. We proceed with inference:
+
+```{r}
+summary(bev.anova)
+```
+
+We see a lot of output in this ANOVA summary table. The variability has been decomposed into 4 parts:
+
+* the variability explained by the main effect of `Promotion`
+* the variability explained by the main effect of `Advertising`
+* the variability explained by the interaction between `Promotion` and `Advertising`
+* the random unexplained variability (this is the residual variability) 
+
+**IMPORTANT!! ALWAYS look at the interaction test first!**  If it is significant, then the non-interaction "main effect" terms (`Promotion` by itself, or `Advertising` by itself) cannot be interpreted meaningfully. 
+
+Here, we see that with an $F$ statistic of 22.09 on 2 and 12 degrees of freedom ($p$-value$\approx 9\times 10^{-5}$), we have significant evidence of an interaction effect: i.e., there is significant evidence that the effect of `Advertising` type on the change in mean beverage sales depends on the type of `Promotion`.  (This is what an interaction is: the effect of one factor on the response variable depends on the setting of another factor).
+
+**Follow-up multiple comparison procedures for two-factor experiments can get complicated quickly**, especially if there is a significant interaction present as in this problem. Fortunately, the `emmeans` package includes methodology to handle such situations. We simply tell `emmeans()` to do a pairwise comparison on one of the factors while **conditioning** on the second. Typically if one factor has less levels, you will condition on it. So here we tell R to perform pairwise Tukey comparisons on the `Promotion` types, while conditioning on `Advertising`.
+
+```{r}
+bev.mc <- emmeans(bev.anova, pairwise ~ Promotion | Advertising)
+```
+
+It is easiest to look at this visually. 
+
+```{r}
+bev.mc$contrast
+plot(bev.mc$contrast)
+```
+
+Looking at the above plot we see that nearly all treatments are significantly different. Only in the case no advertising do we see no significant difference in sales between no vs. moderate price discounts. The interaction effect here is that the differences in mean beverage sales due to heavy promotional price discounts is much larger when there is advertising (as opposed to when there is no advertising). 
+
+
+### If interaction is not significant
+
+If an interaction effect is not significant, we know that it is *not* unique combinations of the two factors that may be influencing the response variable. However, it could be that either of the two factors **individually** is having an influence, regardless of the other factor in the study.  So, in such a case we need to test the effect for each factor separately.  These are known as **main effects.** 
+
+**Since the interaction term is not significant, main effects are meaningful and can be interpreted.** The Tukey method also works when there is no interaction. If the interaction term is not significant, we are okay performing Tukey on significant main effects in the model. Generic code that would do this is in the following code block:
+
+```{r, eval = FALSE}
+factor1.mc <- emmeans(anova.fit, "factor1")
+factor2.mc <- emmeans(anova.fit, "factor2")
+plot(contrast(factor1.mc, "pairwise"))
+plot(contrast(factor2.mc, "pairwise"))
+```
+
+
+
+## In-class Assignment: Oven Component Lifetime
+
+An experiment was conducted to study the effects of temperature and type of oven on the life of a particular component. Four types of ovens and three temperature levels were used in the experiment. Twenty-four pieces were assigned randomly to each treatment (i.e. each combination of temperature and oven type) in equal sizes of 2 replications, and the data were recorded in `componentCast.csv` on the Hughes data repository.
+
+Describe the following:
+
+* **Experimental Units in this study?**  
+
+*Oven Parts*
+
+* **The factors of interest in this study?**
+
+*The effects on the oven parts *
+
+* **How many factor levels are there?**
+
+*Four different types of ovens and three temperature levels.*
+
+* **What are the treatments?**
+
+*Different temperatures and oven types*
+
+* **What other steps were taken to control for nuisance variables and unexplained variability?**  
+
+*Replication of the experiment*
+
+We begin our analysis by briefly looking at the data. 
+
+```{r}
+component <- read.csv("http://users.miamioh.edu/hughesmr/sta363/componentCast.csv")
+kable(head(component))
+```
+
+**GOAL.** In this study we are interested in testing if the different temperature and/or ovens have an effect on the life of the components.
+
+### Data Cleaning
+
+The first thing we will do is make sure everything is correct in R. We will convert both `Temperature` and `Oven` to factors.  `Temperature` is recorded as a numeric variable but we want to treat it categorically here. (We also do this with `Oven`, though it is not necessary.)
+
+```{r}
+# Convert Temperature and Oven to factors
+component <- component %>%
+  mutate(Temperature = as.factor(Temperature),
+         Oven = as.factor(Oven))
+glimpse(component)
+```
+
+### EDA
+
+Create an interaction plot for temperature and oven type. Put `Temperature` on the *x*-axis since it is naturally quantitative (compared to the oven type (labeled A, B, C, D)), so it follows intuition a little bit better.
+
+```{r}
+ggplot(component, aes(x=Temperature,y=Lifetime, color=Oven, group=Oven))  + 
+  stat_summary(fun=mean, geom="point") +
+  stat_summary(fun=mean, geom="line") + 
+  labs(y="Effects in Oven parts given Temperature") + 
+  theme_bw()
+```
+
+*We can see that oven A and C have similar progressions with C having a higher effect. Oven B has a loss of effects between 500 and 550 degrees. Lastly, oven D's effects increase between 500 and 550 degrees then has a significant loss between 550 and 600 degrees.*
+
+### Analysis
+
+Perform a Two-Way ANOVA. Be sure to check your assumptions!
+
+```{r}
+component.anova <- aov(Lifetime ~ Temperature + Oven + Temperature:Oven, data=component)
+autoplot(component.anova)
+summary(component.anova)
+```
+
+*The data seems to be normal, the residual plot is linear, the scale-location plot is relatively horizontal with a minor bump in it. Overall the data seems to check out all assumptions.*
+
+*The interaction between Temperature and Oven has a P-value of 0.22152. Therefore there is a significant contrast in comparisons and we will perform a multiple comparisons test.*
+
+
+### Multiple Comparisons
+
+Test the multiple comparisons (only if necessary). Be sure to account for any interactions present in the data.
+
+```{r, message=FALSE}
+oven.mc <- emmeans(component.anova, "Oven")
+temperature.mc <- emmeans(component.anova, "Temperature")
+
+plot(contrast(oven.mc, "pairwise"))
+plot(contrast(temperature.mc, "pairwise"))
+```
+
+*Ovens B-D and A-D have a significant contrast in their multiple comparisons test. Furthermore, temperatures 500-600 have significant contrast since their interval does not include zero.*
+
+
+

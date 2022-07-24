@@ -1,0 +1,259 @@
+---
+title: "Class 05: Multiple Comparisons"
+author: "Ethan Gutknecht"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+```
+
+**Recall the Tire Tread Comparison from Class 04:** A tire manufacturer is interested in investigating the handling properties for different tread patterns. Data were recorded on the stopping distances measured to the nearest foot for a standard sized car to come to a complete stop from a speed of 60 miles per hour. There are six measurements of the stopping distance for each of four different tread patterns labeled A, B, C and D. The same driver and car were used for all 24 measurements and, although not clear from the saved data file, the order of treatments were assigned at random.'
+
+Last class, we ran a one-way ANOVA and found a significant difference between **at least two** of the two tread patterns true mean stopping distance:
+
+```{r}
+Tire <- read.csv("http://users.miamioh.edu/hughesmr/sta363/TireData.csv")
+tire.anova <- aov(StopDist ~ tire, data=Tire)
+summary(tire.anova)
+```
+
+The question we confront now is: **which tire tread patterns are different from each other?**  The *F*-test only tells us that we can be confident that *some* difference exists, but it does not tell us which ones are different!  To do so, we we need to perform a follow-up to the significant *F*-test.
+
+## Follow-up Multiple Comparisons
+
+We begin some follow-up procedures by revisiting the boxplots we made before running the ANOVA:
+
+```{r}
+ggplot(Tire) + 
+  geom_boxplot(aes(x=tire, y=StopDist), col="gray60" ) +
+  geom_jitter(aes(x=tire, y=StopDist), width=0.1 ) +
+  labs(x="Tread Type", y="Stopping Distance") + 
+  theme_bw()
+```
+
+By eyeball method, it sure looks like the stopping distance is shorter (smaller) in tire tread group $A$.
+
+Note we are adding the `geom_jitter()` layer - we now get the raw data reported with the 5 number summary in the Box-whiskers plot
+
+(BTW, what do you think would happen if you switched the order of the `geom_boxplot()` and `geom_jitter()` lines? -- Feel free to try on your own!)
+
+
+### How do we statistically test for differences?
+
+It seems intuitive that we could perform a $t$-test comparing tread group $A$ to group $B$, and then tread group $A$ to $C$, $A$ to $D$, $B$ to $C$, $B$ to $D$ and $C$ to $D$. We note that one-way ANOVA essentially is comprised of 6 two-sample comparisons! That is, **it jointly makes all six comparisons at one time.**
+
+**So why not just do six two-sample $t$-tests?**  The answer relates to probability. First, recall from Intro Stats:
+
+$$\textrm{significance level} = \alpha = P(\textrm{Type I error})$$
+
+Further,
+
+$$P(\textrm{No Type I error}) = 1 - P(\textrm{Type I error}) = 1 - \alpha$$
+
+by the complements rule. Now, imagine I perform **two** statistical tests, each at significance level $\alpha$. 
+
+$$P(\textrm{No Type I errors in either test}) = P(\textrm{No Type I error in test 1 AND No Type I error in test 2})$$
+
+The right hand side is comprised of two independent events (performing the first hypothesis test followed by a second). Thus,
+
+$$P(\textrm{No Type I errors in either test}) = (1 - \alpha)\times(1-\alpha) = (1-\alpha)^2$$
+
+Suppose $\alpha=0.05$, then $P(\textrm{No Type I errors in either test}) = 0.95^2 = 0.9025$, thus $$P(\textrm{Type I error occurs}) = 1 - 0.9025 = 0.0975.$$
+
+By the same rationale, if we performed **six** hypothesis tests, the probability of a Type I error occuring is 
+$$1 - (1 - \alpha)^6 = 1 - 0.95^6 = 0.2649$$
+
+So, if we performed six two-sample *t*-tests, each at 5\% significance, there is greater than a 25\% chance we commit a Type I error somewhere in the complete analysis!  This is generally considered unacceptable.  Think about as to why.
+
+#### Further comments on ANOVA and larger design issues
+
+When performing the ANOVA $F$-test on the four tire treads, the null hypothesis states $H_0: \mu_A = \mu_B = \mu_C = \mu_D$ and the $F$-test essentially provides a method to determine if at least one pairwise comparison would be rejected, while controlling for the overall Type I error rate. That is, it essentially tests all 6 two-sample comparisons while controlling for the overall type I error rate. 
+
+The ANOVA $F$-test is an example of what are known in statistics as *omnibus tests*. These tests are useful in determining if there is any difference among the treatments but has limitations since it does not provide details on how the null hypothesis may be rejected. Therefore to determine the effects within an omnibus test, use *multiple comparisons* methods or predetermined *contrasts* (covered in a course such as STA 463 or 466).
+
+### Multiple Comparisons
+
+There are several methods available to adjust the overall significance level when performing multiple hypothesis tests (known as **multiple comparisons**): 
+
+#### Bonferoni Correction
+
+One of the simplest methods is to just adjust the $\alpha$-level proportionally downward for each test you perform.  This is typically known as a Bonferroni correction. Basically, if you are performing $m$ hypothesis tests, or building $m$ confidence intervals, perform each with significance level
+$$\alpha^* = \frac{\alpha}{m},$$
+or with corresponding confidence level $1-\alpha^* = 1-\alpha/m$. This is guaranteed to control the overall Type I error rate to be less than $\alpha$. 
+
+As an example consider performing two test each at $5\%$ significance level, we know the overall Type I error rate is closer to 9\% (see above). If each test was performed at $0.05/2=0.025$ we would get an overall Type I error rate of 
+$$P(\textrm{Type I error is committed}) = 1-P(\textrm{No Type I error}) = 1 - (1-0.05/2)^2 = 0.049375 < 0.05$$ 
+
+With six hypothesis tests, we would perform each at $0.05/6 = 0.008333$ which results in an overall error rate of $0.04897 < 0.05$.
+
+The Bonferroni method is always available but generally not preferred when the number of comparisons is large, as it tends to be overly conservative in protecting against Type I errors.
+
+#### Tukey HSD ("Honest Significant Differences")
+
+This method is attributed to John Tukey (nothing to do with Thanksgiving.) The Tukey method controls the overall Type I error rate by adjusting the significance level each of the individual comparison but it does so in a more complex way than the naive Bonferroni approach above. The result can also be displayed as confidence intervals. It is implemented in the `emmeans` function in the `emmeans` package.
+
+```{r, message=FALSE}
+library(emmeans)                        # Load the package
+tire.mc <- emmeans(tire.anova, "tire")  # Run emmeans on the factor "tire"
+contrast(tire.mc, "pairwise")           # Perform pairwise comparisons
+```
+
+Here, we see pairwise comparisons and the $p$-values of each comparison has been adjusted for the fact we are performing six multiple comparisons. We see that tread $A$ is different than $C$ and $D$; otherwise there is no difference in tread groups.
+
+We can also calculate more informative confidence intervals of the comparisons.
+
+```{r}
+confint(contrast(tire.mc, "pairwise"))
+```
+
+From this output, we can conclude (with 95% confidence) that:
+
+* tread $A$ has a mean stopping distance that is between 11.5 to 72.4 feet shorter than tread $C$
+* tread $A$ has a mean stopping distance that is between 0.22 to 61.1 feet shorter than tread $D$
+* no other tread types have significantly different mean stopping distances (all other CIs contain 0)
+
+We can also plot the pairwise comparisons
+
+```{r}
+plot(contrast(tire.mc, "pairwise"))
+```
+
+**Remember** when looking at the confidence intervals we are looking to see if **zero** is inside any given CI (this would indicate no significant difference).
+
+#### Dunnett Multiple Comparisons
+
+Another method for multiple comparison is known as Dunnett's method. It works in a similar way (controlling the overall error rate) as Tukey. However, here one of the treatments (by default the first one listed) is considered a **control**, and the only comparisons considered are versus the control. 
+
+Suppose tire tread $D$ is the *control*.  We simply need to tell `emmeans` that the reference factor level (`ref`) is the fourth one list; i.e., treatment $D$.
+
+```{r}
+contrast(tire.mc, "trt.vs.ctrl", ref=4)
+```
+
+You'll note that now we are only making three comparisons, each treatment is compared to the *control*. 
+
+As before, we can calculate and plot the confidence intervals:
+
+```{r}
+confint(contrast(tire.mc, "trt.vs.ctrl", ref=4))
+plot(contrast(tire.mc, "trt.vs.ctrl", ref=4))
+```
+
+#### Other important design considerations
+
+The Tukey HSD method automatically does all pairwise comparisons (in the tire example there are 6 such comparisons) while Dunnett automatically compares all treatments to a control (treatment D in our example). What if we wanted to test specific comparisons?
+
+For example, maybe groups A and D are *the* standard tread types (and could be considered *control* groups), then it may be of interest to the researcher to compare 
+
+* A to B, 
+* A to C, 
+* B to D, and 
+* C to D. 
+
+There are now 4 comparisons. 
+This sort analysis involves constructing predetermined *contrasts*. 
+In fact, the overall ANOVA $F$-test is not particularly helpful here since it essentially does all 6 comparisons. 
+This type of analysis is outside the scope of this class. 
+If you find yourself needing to perform this sort of analysis, consider taking STA 463, 466, or contacting a Statistician for help!
+
+
+## In-class Assignment
+
+### Espresso Brewing
+
+Several brewing techniques are used to make espresso coffee. Among them, the most widespread are bar machines and single-dose capsules, designed in large numbers because of their commercial popularity.  Using the same batch of water, operating settings and batch of coffee beans, espresso was made using three approaches coded as: 1 = Bar Machine,  2 = Hyper-Espresso Method (HIP), 3 = I-Espresso System (IT). The physical and chemical profile of the brewed espresso was summarized using a foam index (`foamInx`) in the data. 
+
+Our goal for today is to perform a complete statistical analysis to determine if, and how, the different brewing methods result in different quality espresso.
+
+
+#### Load packages needed; read in data
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(emmeans)
+
+espresso <- read.csv("espresso_data.csv")
+glimpse(espresso)
+```
+
+
+
+#### Question 1
+
+Do a little data cleaning to create factor versions of the variables that require it.
+
+
+```{r}
+  espresso <- espresso %>%
+  mutate(method=factor(method, 1:3, labels=c("Bar Machine", "Hyper-Espresso Method", "I-Espresso System (IT)")))
+  summary(espresso)
+```
+
+
+#### Question 2
+
+Discuss if this data is part of a **designed experiment** or an **observational study**.  How do you know?
+
+**It is a designed experiment as everything is set up to be controlled. Everything is the same including the water, conditions on brewing, etc. The only thing that changes is the technique of how it is brewed.**
+
+
+
+#### Question 3
+
+Generate a meaningful (and  properly labeled) plot to compare the distributions of the foam index between the three brewing methods.  Comment on what you see, including comment on average and variation in foam index.
+
+
+```{r}
+ggplot(espresso, aes(x=method, y=foamIndx)) +
+  geom_boxplot() +
+  labs(x="Method", y="Foam Index") + 
+  stat_summary(fun=mean, geom="point", shape=23, size=3, fill="gray60") + 
+  theme_bw()
+```
+
+**The foam index of every method is well above zero. The variation of foam indexes for the I-Espresso System is less than the other two methods used in this experiment. **
+
+
+
+#### Question 4
+
+Run a one-way ANOVA to test to see if there is any difference in true mean foam index between the three brewing methods.  You must cite the $F$-statistic value, both numerator and denominator degrees of freedom, the p-value, and the conclusion in problem context.
+
+
+```{r}
+  espresso.anova <- aov(foamIndx ~ method, data=espresso)
+  summary(espresso.anova)
+```
+
+**Based on the results of our ANOVA test, we have a F value of 28.41, degrees of freedom of 2 and 24, and a P-value of 4.7e-07. Thus since the p value is below 0.05, there is a significant difference. We will do follow up tests to find out where the difference lies.**
+
+
+#### Question 5
+
+Check the model residuals to see if there are any suspected problems among the model assumptions.
+
+```{r}
+autoplot(espresso.anova)
+```
+
+**The scale-location has a slight bend in the graph, therefore the variance between the three methods are not uniform.**
+
+
+#### Question 6
+
+Perform appropriate multiple comparisons (only if necessary!) and report the results in context.  You must provide a defense of your choice to use Tukey or Dunnett (or neither!)
+
+```{r}
+espresso.mc <- emmeans(espresso.anova, "method")  # Run emmeans on the factor "tire"
+contrast(espresso.mc, "pairwise")                 # Perform pairwise comparisons
+```
+
+**Since the method I-Espresso System has a P value greater than 0.05, it is not significantly different. The other two methods have a p-value less than 0.05, thus they have a significant difference.**

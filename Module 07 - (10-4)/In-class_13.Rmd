@@ -1,0 +1,422 @@
+---
+title: "In-Class 13: Estimation and Prediction in Regression"
+author: "Fisher/Hughes"
+output: html_document
+---
+
+
+  
+```{r setup, include=FALSE}
+# ReadTable()
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+library(lindia)
+library(ggfortify)
+library(GGally)
+```
+
+
+## Manatees revisited
+
+Recall the manatee data and simple linear regression from class 09:
+
+```{r, warning=FALSE}
+manatees <- read.csv("manatee.csv")
+manatee.fit <- lm(ManateesKilled ~ BoatsRegistered, data=manatees)
+autoplot(manatee.fit)
+```
+
+The assumptions look pretty good:
+
+* **Linearity:** Nothing concerning about linearity from the smoothed line in Residuals vs Fitted
+* **Homogeneous error variance:** No clear overly concerning systematic pattern in the residuals in the Residuals vs Fitted or Scale-Location
+* **Normality:** looks great according to QQ-Plot
+
+Let's look at the summary of the fitted model:
+
+```{r}
+summary(manatee.fit)
+```
+
+We see:
+
+* The number of boats registered is a sigificant predictor for the number of manatees killed ($F$-stat of `r round(summary(manatee.fit)$fstatistic[1],3)` on `r summary(manatee.fit)$fstatistic[2]` and `r summary(manatee.fit)$fstatistic[3]` degrees of freedom, or the $t$-stat of `r round(tidy(manatee.fit)$statistic[2], 3)`, both with a $p$-value of near 0)
+* The model including the number of boats registered explains about `r round(summary(manatee.fit)$adj.r.squared, 2)*100`\% of the variability in the number of manatees killed per year.
+
+Let's visually look at the fitted model, represented by the plotted estimated regression equation. By using the `predict()` function, we can add on the predicted ($\hat{y}$ values), the expected mean number of manatees killed, for each record on the number of boats registered.
+
+```{r}
+manatees <- manatees %>%
+  mutate(Fitted = predict(manatee.fit))
+
+ggplot(manatees) + 
+  geom_point(aes(x=BoatsRegistered, y=ManateesKilled) ) +
+  geom_line(aes(x=BoatsRegistered, y=Fitted), color="royalblue", size=1.25) + 
+  labs(x="Boats Registered (1000s)", y="Manatees killed by motorboats") + 
+  theme_bw()
+```
+
+We saw in the previous lecture that we can build confidence intervals for the coefficients in our model
+
+$$ManateesKilled = \beta_0 + \beta_1(BoatsRegistered) + \varepsilon$$
+
+```{r}
+confint(manatee.fit)
+```
+
+**Interpretations:**
+
+* With 95\% confidence, 1000 more boats registered (1 unit), will result in approximately 0.1168 to 0.1483 manatees killed. To phrase another way, for every 100,000 boats registered (100 units), you can be confident that between approximately 11.7 to 14.8 manatees would be killed.
+* The CI for the intercept has no meaningful interpretation here.
+
+----
+
+### Confidence Bands
+
+We can incorporate the information in the confidence limits for both the slope and intercept terms to build a **confidence "interval" for the entire line.** The result is known as a **confidence band** that provides confidence boundaries for the **estimation of the mean value of the response at a particular $X$ value**. 
+
+We can extract this band around our line from the `predict()` function in R:
+
+```{r}
+head(predict(manatee.fit, interval="confidence"))
+```
+
+The cases you see displayed above correspond to the first 6 cases (rows) of the data set.  The first column above is the fitted values (i.e. the model-generated predicted values for $Y$), and the second and third columns are the corresponding lower and upper 95% confidence limits.  We can extract these columns and use them for plotting:
+
+```{r}
+manatee.conf.band <- data.frame(predict(manatee.fit, interval="conf") )
+manatees <- manatees %>%
+  inner_join(manatee.conf.band, by=c("Fitted"="fit")) %>%
+  rename(Lower.CI = lwr, Upper.CI = upr)
+
+ggplot(manatees) + 
+  geom_point(aes(x=BoatsRegistered, y=ManateesKilled)) +
+  geom_line(aes(x=BoatsRegistered, y=Fitted), color="royalblue", size=1.25) + 
+  geom_line(aes(x=BoatsRegistered, y=Lower.CI), color="steelblue1") + 
+  geom_line(aes(x=BoatsRegistered, y=Upper.CI), color="steelblue1") + 
+  labs(x="Boats Registered (1000s)", y="Manatees killed by motorboats") + 
+  theme_bw()
+```
+
+Note the fanning type appearance you see in the confidence bands (think about how the line will change if the intercept and slope and stretched to their confidence limits).
+
+We can make a similar plot by adding a `geom_ribbon` object:
+
+```{r}
+ggplot(data=manatees) + 
+  geom_ribbon(aes(x=BoatsRegistered, ymin=Lower.CI, ymax=Upper.CI), fill="gray60") + 
+  geom_point(aes(x=BoatsRegistered, y=ManateesKilled) ) +
+  geom_line(aes(x=BoatsRegistered, y=Fitted), color="royalblue", size=1.25) + 
+  labs(x="Boats Registered (1000s)", y="Manatees killed by motorboats") + 
+  theme_bw()
+```
+
+### Prediction bands
+
+The above work is all about building a confidence interval around our fitted line. Essentially, confidence bands are "intervals" around the fitted line. A similar, but fundamentally different, question is to use the fitted line to **make predictions for individual future observations**. For instance, suppose 784 thousand boats were registered in the state of Florida: how many manatees would you predict will be killed? 
+
+We can use our fitted line to answer this question and also build an interval *around* that prediction. This is known as a **prediction interval.** We use the `predict()` function here as well, but now we must specify the new data to predict:
+
+```{r}
+predict(manatee.fit, newdata=data.frame(BoatsRegistered=784), interval="pred")
+```
+
+**Interpretation:** We predict, with 95% confidence, that between 41.544 and 79.165 manatees (i.e. 41 to 80) will be killed when 784 thousand boats (i.e. 78,400) are registered. Note how much wider this range is when compared to the earlier confidence band -- since we are predicting a non-observation (compared to building a confidence interval around an observed point) we have more uncertainty, and thus a wider interval.
+
+We could repeat this process for all points and build a **prediction band** for the model:
+
+```{r, warning=FALSE}
+manatee.pred.band <- data.frame(predict(manatee.fit, interval="pred") )
+manatees <- manatees %>%
+  left_join(manatee.pred.band, by=c("Fitted"="fit")) %>%
+  rename(Lower.PI = lwr, Upper.PI = upr)
+  
+ggplot(data=manatees) + 
+  geom_ribbon(aes(x=BoatsRegistered, ymin=Lower.PI, ymax=Upper.PI), fill="gray80") + 
+  geom_ribbon(aes(x=BoatsRegistered, ymin=Lower.CI, ymax=Upper.CI), fill="gray60") + 
+  geom_point(aes(x=BoatsRegistered, y=ManateesKilled) ) +
+  geom_line(aes(x=BoatsRegistered, y=Fitted), color="royalblue", size=1.25) + 
+  labs(x="Boats Registered (1000s)", y="Manatees killed by motorboats") + 
+  theme_bw()
+```
+
+### Extrapolation
+
+We have a fitted line acting as our model. You may recall from earlier mathematics courses that this line will continue out to $-\infty$ to $+\infty$-- thus extending to points far outside the feasible region of context. If we were to use our fitted model to predict outside the scope of our data, we are doing what is known as **extrapolation**.
+
+**In general, extrapolation should be avoided if at all possible ... particularly when well outside the scope of our data.**  Why?  Ask these questions:
+
+* How many manatees do you expect to be killed when there are 1100 thousand (= 1,100,000) boats registered?
+* How many manatees do you expect to be killed when there are 5000 thousand (= 5,000,000) boats registered?
+
+The first situation is outside the scope of our data, but not too extreme. The second example is just silly but the computer will calculate for us (remember, computers are dumb!):
+
+```{r}
+predict(manatee.fit, interval="pred", newdata=data.frame(BoatsRegistered=c(1100, 5000)))
+```
+
+Note the range in the 95\% prediction interval for the extreme case of extrapolation. We can visualize extrapolation but creating some data from which to `predict` using our fitted model.
+
+```{r}
+fake.boats <- data.frame(BoatsRegistered=seq(0,8000,100))
+
+fake.boats <- fake.boats %>%
+  mutate(PredictedManatee = predict(manatee.fit, newdata=fake.boats) ) %>%
+  left_join(data.frame(predict(manatee.fit, newdata=fake.boats, interval="pred")),
+            by=c("PredictedManatee"="fit")) %>%
+  rename(Lower.PI = lwr, Upper.PI = upr)
+
+ggplot(fake.boats) + 
+  geom_ribbon(aes(x=BoatsRegistered, ymin=Lower.PI, ymax=Upper.PI), fill="gray80") + 
+  geom_line(aes(x=BoatsRegistered, y=PredictedManatee), color="royalblue", size=1.25) + 
+  geom_point(data=manatees, aes(x=BoatsRegistered, y=ManateesKilled) ) + 
+  labs(x="Boats Registered (1000s)", y="Manatees killed by motorboats") + 
+  theme_bw()
+```
+
+----
+
+## Patient Satisfaction data revisited
+
+Let's make a couple of predictions for future patients using the patient satisfaction model we already fitted.  First recall:
+
+```{r, warning=FALSE}
+patsatdat <- read.table("patientsatisfaction.txt", header=TRUE)
+ggpairs(patsatdat)
+```
+
+Revisit class 09 for more details about this plot, but the display for the `sex` variable is not particular effective. We should turn it into a categorical, or factor, variable. 
+
+It turns out, because there are only two categories here, whether they are coded as 0/1 or as factor variables, we will get the same result.
+
+#### Modeling `sex` as a numeric 0/1 variable
+
+```{r}
+mr.model1 <- lm(satis.index ~ age + ill.sev.index + anx.index + sex, data=patsatdat)
+autoplot(mr.model1)
+```
+
+Overall we saw nothing too concerning in the residual plots. Constant variance looks reasonably met, as does normality. So, check the model summary:
+
+```{r}
+summary(mr.model1)
+```
+
+#### Modeling `sex` as a factor variable
+
+Below we properly label the factor variable in context. We exclude the residual plots but do provide the summary output to show it is the same fitted model.
+
+```{r}
+patsatdat <- patsatdat %>%
+  mutate(sex = factor(sex, 0:1, labels=c("Male", "Female") ) ) 
+mr.model2 <- lm(satis.index ~ age + ill.sev.index + anx.index + sex, data=patsatdat)
+summary(mr.model2)
+```
+
+Note you get the same fitted model, but the coefficient is now labeled to tell you that the *slope* is associated with the `female` effect. That is, when holding all other variables constant, the model predicts a female to report a satisfaction score `r round(abs(coef(mr.model2)[5]),3)` lower than a male (and we note this is not a significant effect, $p$-value=0.9969).
+
+### Model conclusions
+
+* Overall, the model significantly predicts patient satisfaction ($F$-stat of `r round(summary(mr.model1)$fstatistic[1],3)` on `r summary(mr.model1)$fstatistic[2]` and `r summary(mr.model1)$fstatistic[3]` degrees of freedom, $p$-value$\approx 10^{-10}$).
+* There is evidence that illness severity, anxiety severity and gender do not have much influence on satisfaction level (each is insignificant via the $t$-test when included with the other variables)
+* The model explains about `r round(summary(mr.model1)$adj.r.squared,2)*100`\% of the variability in patient satisfaction scores.
+
+### Estimation/Prediction in multiple regression models
+
+It is not possible to plot the confidence or prediction bands in this case, but we can generate the confidence intervals and prediction intervals for an observation with a specific set of covariates. 
+
+The following code generates a 95% prediction interval (PI) for the satisfaction score of a 47 year-old male with an illness index of 54 and an anxiety index of 2.5. Do the same for a 37 year-old female with an illness index of 48 and anxiety index of 2.3.
+
+```{r}
+new.patients <- data.frame(age = c(47, 37),
+                           ill.sev.index = c(54, 48),
+                           anx.index = c(2.5, 2.3),
+                           sex=c(0, 1))
+predict(mr.model1, newdata=new.patients, interval="pred")
+```
+
+We can be 95% confident that the first patient would have a satisfaction score of between 26.1 to 68.5, and the second patient between 42.9 and 85.2.
+
+
+
+## In-class Assignment
+
+For today's assignment, we will be revisiting the U.S. county coronavirus data set. The full description is provided again below for your convenience. 
+
+### Data Description
+
+Data was collected from the 2019 United States Census Bureau American Community Survey (ACS), the 2017 FBI Uniform Crime Reporting database (UCR), the 2017 US Department of Agriculture farming Census, results from the 2020 general election, Unemployment numbers from the Bureau of Labor Statistics, Mask wearing survey data from the New York Times and COVID-19 Coronavirus cases and deaths (from USA  Facts, a not-for-profit nonpartisan civic initiative providing government data) for each county/parrish in the United States and Washington, D.C. The combined data includes the following variables
+
+
+* `countyFIPS` - The five character numeric FIPS code uniquely identifying the county
+* `CountyName` - The name of the county/parrish
+* `State` - The two character abbreviation for the State
+* `stateFIPS` - The two character numeric FIPS code uniquely identifying each state
+* `Area` - The geographic area of the county, in squared miles
+* `Total_cases` - The total number of COVID-19 cases reported for the county as of DATE
+* `Total_deaths` - The total number of COVID-19 related deaths reported for the county as of DATE
+* `pop` - The estimated population for the county in the year 2019
+* `age` - The median age of county residents, estimated in the year 2019
+* `income` - The median household income within the county, estimated in 2019
+* `PercCitizens` - The percentage of residents in the county that are US citizens, estimated in 2019
+* `PercCollege` - The percentage of residents in the county with a college degree (Associates or higher), estimated in 2019
+* `PercVets` - The percentage of residents in the county that are veterans of the US armed forces, estimated in 2019
+* `PercHealth` - The percentage of residents in the county that has some form of health insurance (including Medicare and Medicaid), estimated in 2019
+* `per_gop` - The proportion of residents in the county that voted for President Donald Trump in 2020
+* `per_dem` - The proportion of residents in the county that voted for President Joe Biden in 2020
+* `Unemployment_rate` - The estimated county-level unemployment rate in November 2020 (seasonally unadjusted)
+* `HighMaskUsage` - An estimate of the proportion of county residents who "always" or "mostly always" wear a mask while in public, based on a New York Times Survey in September 2020.
+* `Corn` - The amount of Corn harvested in the county, in acres, according to the 2017 USDA census
+* `Soy` - The amount of Soybeans harvested in the county, in acres, according to the 2017 USDA census
+* `Vegetables` - The amount of Vegetables (Broccoli, Beans, etc…) harvested in the county, in acres, according to the 2017 USDA census
+* `officers_killed_by_felony` - The number of police officers killed during the course of felony in 2018
+* `officers_assaulted` - The number of police officers assaulted during the course of their jobs in 2018
+* `violent_crime` - The total number of recorded violent crimes in 2018
+* `property_crime` - The total number of property crimes in 2018
+
+Note: FIPS is the Federal Information Processing Standards mechanism for uniquely identifying states, counties and other regions.
+
+### Goals for this assignment
+
+#### Statistical Goals
+
+The assignment **reviews the material** for module 05 and module 06 while also providing you the opportunity to perform some prediction and study *effect size*. 
+
+
+#### Contextual Goals
+
+We will look at building a model to help explain Coronavirus cases and death rates across the contiguous United States. 
+Please note that in STA 363 we attempt to use real and relevant datasets as much as possible. One of the main ideas from today is that a linear model from observational data does NOT lead to *causal* arguments about what variables cause more Coronavirus deaths, nor should any results today lead to broad conclusions about policy, politics, health or safety. 
+We are only using a few of the variables in this large dataset and, like more real-world problems, the current situation is more complicated than the data provided. This data includes the latest Coronavirus counts as 14 September 2020 from the USA Facts website.
+
+### Directions
+
+Below are 10 questions to answer. This assignment has been structured to provide a review of the regression topics we have covered in Module 05 and 06. Some of these questions are similar to those that will be asked in the upcoming midterm.
+
+You should also note that the amount of coding in this assignment is fairly *light*. We have provided much of the code needed for the assignment. You will need to edit and add some code in a few spots, but this assignment is **primarily about statistical questions**.
+
+### Data Wrangling (provided)
+
+```{r}
+county_data <- read.csv("usCountyCoronaVirusData_2020-11-07.csv")
+
+county_data <- county_data %>%
+  mutate(Property_crime_rate = property_crime/pop*1000,
+         Violent_crime_rate = violent_crime/pop*1000,
+         Pop_density = pop/Area,
+         AgHarvest = Corn + Soy + Vegetables,
+         Corona_rate = Total_cases/pop*1000,
+         Corona_death_rate = Total_deaths/pop*1000) %>%
+  filter(!State %in% c("AK", "HI"))
+```
+
+
+-----------
+
+### Question 1
+
+We fit two models to these data below (omitting the check for residuals). Which of these two models would generate **more precise** predictions of Coronavirus case rates, and why?
+
+```{r}
+model1 <- lm(log10(Corona_rate+1) ~ age + income + PercCollege + per_dem + 
+               log10(Pop_density) + log10(Property_crime_rate+1), data=county_data)
+summary(model1)
+
+model2 <- lm(log10(Corona_rate+1) ~ age + income + PercCollege + per_dem + log10(Pop_density) + 
+               log10(Property_crime_rate+1) + PercHealth + AgHarvest, data=county_data)
+summary(model2)
+```
+
+**Answer Here**
+
+
+
+### Question 2
+
+We will now use the preferred model from Question 1 to find a 99% prediction interval for the logarithm of a county's Coronavirus rate where the county's median age is 48, the median household income is \$43,500, 22% of the adult population has a college degree, 52% of the county voted for President Biden in 2020, the population density is 90 people per square mile (thus $\log_{10}(90)=1.9542$), the property crime rate is 2.1 crimes per 1000 residents (thus $\log_{10}(2.1)=0.3222$), 97% of the citizen have health care and only 100 acres of agriculture was harvested as a single pumpkin farm.
+
+Note the following code creates a `data.frame` with the outlined variables.
+
+```{r}
+fictional_county <- data.frame(age = 48, 
+                               income = 43500,
+                               PercCollege = 22, 
+                               per_dem = 0.52,
+                               Pop_density = 90,
+                               Property_crime_rate = 2.1,
+                               PercHealth = 97,
+                               AgHarvest = 100)
+```
+
+In the code chunk below build a 99\% prediction interval for the fictional county and interpret this interval in context.
+
+```{r}
+## Code here
+```
+
+**Answer Here**
+
+
+### Question 3
+
+Is the prediction for hypothetical county in Question 2 the result of extrapolation? See if you can tell by looking at the scatterplot matrix below:
+
+```{r, fig.width=10, fig.height=10, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+county_for_plot <- county_data %>%
+  mutate(Corona_rate = log10(Corona_rate+1),
+         Log_Pop_density = log10(Pop_density),
+         Log_Prop_crime = log10(Property_crime_rate+1)) %>%
+  select(age, income, PercCollege, per_dem, Log_Pop_density, Log_Prop_crime, PercHealth, AgHarvest)
+
+ggpairs(county_for_plot,
+        lower = list(continuous = wrap("points", alpha=0.15, size=0.95)),
+        upper = list(continuous = wrap("cor", color="black") ) ) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank() )
+```
+
+**Answer Here**
+
+
+## Question 4
+
+In the code chunk below build a 99\% *confidence* interval for the mean log coronavirus rate of counties with the same demographics as the fictional county in Question 2 and interpret this interval in context. How does this interval compare to the interval in Question 2, and why is the interpretation different?
+
+```{r}
+## Code here
+```
+
+**Answer Here**
+
+
+## Question 5
+
+Suppose the county's support for President Biden was 53% (compared to 52%), build a 95% prediction interval for the county's Coronavirus rate. We wish to compare this to the interval above. 
+
+This code chunk creates a `data.frame` with the information for the two fictional counties, note all variable values are the same except for the `per_dem`.
+
+```{r}
+fictional_counties <- data.frame(age = c(48,48), 
+                                 income = c(43500,43500),
+                                 PercCollege = c(22,22), 
+                                 per_dem = c(0.52,0.53),
+                                 Pop_density = c(90,90),
+                                 Property_crime_rate = c(2.1,2.1),
+                                 PercHealth = c(97,97),
+                                 AgHarvest = c(100,100) )
+```
+
+In the below code chunk, build 95\% prediction intervals for the Coronavirus rates in the two fictional counties (that is, "un"-transform the response).
+
+```{r}
+## Code here
+```
+
+How do the intervals compare? What does this suggest about the effect of support for Biden on the coronavirus rate?
+
+**Answer Here**
+
+
+

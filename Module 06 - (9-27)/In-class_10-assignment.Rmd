@@ -1,0 +1,73 @@
+---
+title: 'In Class 10: Assignment'
+author: "Your Name"
+date: "9/27/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(modelr)
+library(knitr)
+# library(kableExtra)   ## uncomment if you want to use it
+```
+
+## Introduction
+
+When woodworking, the strength of the wood is of crucial importance for structural integrity of your final product. In particular, the Modulus of Rupture (MOR) can provide an overall measure of a wood specimen's strength. Unfortunately, to obtain the MOR of any particular piece of wood, it must be destroyed (i.e., ruptured). In an effort to build a predictive model for the MOR of wood, 29 Loblolly pine specimens were randomly sampled and the Specific Gravity (g/cm$^3$), a measure on the density of the wood which does not require destroying the wood sample, and the MOR (in kiloPascals, kPa) were recorded. 
+
+## Data Cleaning
+```{r}
+# Rename the two variables to the corresponding axis
+pine <- read.csv("loblollyPineData.csv") %>%
+  rename(SpecificGravity=X,
+         ModulusRupture=Y)
+```
+
+## Exploratory Data Analysis
+```{r message=FALSE}
+# Create a ggplot of the Specific Gravity & Modulus Rupture
+ggplot(pine, aes(x=SpecificGravity, y=ModulusRupture) ) + 
+  geom_point() + 
+  geom_smooth(method="lm", se=FALSE) + 
+  theme(plot.margin = unit(c(3,1,3,1),"cm")) +
+  xlab("Specific Gravity") +
+  ylab("Modulus Rupture")
+  
+```
+
+```{r}
+# Show the correlations
+cor(pine)
+```
+*Based on the results, we can see that for one specific gravity unit change, there is a positive correlation of 0.9434 modulus rupture change.*
+
+## Run the Regression Test
+```{r}
+# Create the regression model and show the summary
+pine_fit <- lm(ModulusRupture ~ SpecificGravity, data=pine)
+summary(pine_fit)
+```
+
+
+
+```{r}
+## Two functions from tidymodels can extract information 
+## for us and put them in tibbles/data.frames
+coef_table <- tidy(pine_fit, conf.int=TRUE)
+model_summary <- glance(pine_fit)
+```
+
+```{r}
+# Show the coefficient table
+coef_table
+```
+
+
+```{r}
+# Show a summary of the regression model
+model_summary
+```
+

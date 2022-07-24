@@ -1,0 +1,272 @@
+---
+title: "Class 06: ANOVA with Blocks"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(emmeans)
+```
+
+# Blocking
+
+In a statistical setting, a **block** is a relatively homogeneous set of experimental material. 
+
+**What does this mean?**
+
+Essentially a block is a known effect or known **confounding** factor in a design but it is something we are not necessarily experimentally interested in. For example, in a before and after paired $t$-test design, the subject under study (e.g., person or animal) can be considered a block. We know each person/animal has their own dynamics/variability but we are not concerned with those, we are interested testing some other factor.
+
+Many things can be a block, today we will consider one specific example.
+
+## Example
+
+A consumer product-testing organization wished to compare the power consumption of five different brands of dehumidifier, labeled 1 to 5. Brand 1 is often promoted as the market leader in power efficiency. The goal of the study is to see if there is significant evidence to support this claim.
+
+It is well known that power consumption depends on the prevailing humidity level, so it was decided to monitor each brand at four different (controlled) humidity levels ranging from moderate to heavy humidity. Within each level, five brands were randomly tested and the power consumptions (kWh) was recorded in `humidity.txt` on the Hughes data repository. There, the first column represents the brand (recorded numerically), the second the humidity level (also recorded numerically) and the third column is the annual power consumption.
+
+Describe the following:
+
+* **Experimental Units in this study?**  *The humidifiers under study are the EUs.*
+* **The factor of interest in this study?** *The factor of interest in this study is the brand of humidifier.*
+* **How many factor levels are there?** *There are five factor levels corresponding to the 5 brands of humidifiers.*
+* **What are the treatments?** *The treatments are each of the five brands.*
+* **What confounding variable is there? How is it controlled?** *The humidity level is a confounding (and known) effect on power consumption. We attempt to control it by using a block design and subjecting each brand of humidifier to all four humidity levels.*
+* **What other steps were taken to control for nuisance variables and unexplained variability?***It is stated in the description that the humidifiers are randomly subjected to the experimental conditions. This will also help mitigate potential nuisance variables.*
+
+```{r}
+# Note: these data are in a .txt file containing a header row: use read.table()
+humidity <- read.table("http://users.miamioh.edu/hughesmr/sta363/humidity.txt", header=TRUE)
+kable(head(humidity))
+```
+
+Notice the `Brand` and `Humidity` levels are recorded as numerical values. We want to make sure R treats them as factor levels.
+
+```{r}
+humidity <- humidity %>%
+  mutate(Brand = as.factor(Brand),
+         Humidity = as.factor(Humidity))
+```
+
+Ultimately we want to statistically test the following hypotheses:
+
+$$H_0: \mu_1 = \mu_2 = \mu_3 = \mu_4 = \mu_5~~~\textrm{vs.}~~~H_a: \textrm{at least two differ}$$
+where $\mu_i =$ the true mean power consumption for Brand $i$.
+
+### Wrong Analysis
+
+We begin by performing a **WRONG** analysis for this design. Since we are interested in determining if `Brand` influences power consumption, suppose you erroneously decided to perform a One-Way ANOVA to test this hypothesis. First we explore some EDA:
+
+```{r, message=FALSE}
+humidity %>% 
+  group_by(Brand) %>%
+  summarize(Mean=mean(Power),
+            SD=sd(Power),
+            N=n()) %>%
+  kable()
+
+ggplot(humidity) + 
+  geom_boxplot(aes(x=Brand, y=Power)) + 
+  theme_bw()
+```
+
+Based on the EDA, we do see some difference between the four brands, but we also note the high variability within each group. This can be seen in the side-by-side box plots as there is substantial overlap between the boxes. *(Note that we are summarizing 4 observations with 5 summary statistics! It is silly to use boxplots here).*
+
+We proceed (unwittingly) with a One-Way ANOVA:
+
+```{r}
+wrong.analysis <- aov(Power ~ Brand, data=humidity)
+autoplot(wrong.analysis)
+```
+
+The residual analysis actually looks pretty good. The error variability looks constant and the normality assumption looks pretty good. 
+
+```{r}
+summary(wrong.analysis)
+```
+
+So looking at the results we would conclude that the `Brand` does NOT have an influence on power consumption (*p*-value=0.204). Visually we see that maybe Brand 1 is smaller than Brand 5, except a One-Way ANOVA tells us this is not the case. So from this analysis, the claim of better power efficiency for Brand 1 is **not** supported.
+
+**Why is this analysis wrong?**
+
+* In the EDA, building box plots is silly because we have 4 observations and are summarizing it with 5 measurements! 
+* We did not respect the structure of our design: we are completely ignoring the (known) effect humidity level has on power consumption -- in ANOVA we are trying to explain variability by partitioning the $SS_{Total}$ into $SS_{Treatment}$ and $SS_{Error}$ (it is called Analysis of *Variance* after all!). The humidity level will explain some of the variability reamining in $SS_{Error}$.
+
+### Correct Analysis
+
+We begin with some EDA. Rather than box plots, we simply plot the observed observations. But since each of the brands was subjected to four levels of humidity, we color the points based on `Humidity` level and we draw some lines connected the `Humidity` levels -- these are known as *profiles*.
+
+```{r}
+ggplot(humidity) + 
+  geom_line(aes(x=Brand, y=Power, col=Humidity, group=Humidity)) + 
+  geom_point(aes(x=Brand, y=Power, col=Humidity), size=3) +
+  theme_bw()
+
+```
+
+We see the power consumption as a function of `Brand` for each of the `Humidity` levels. We notice a few things: there appears to be an increase in power consumption from Brand 1 to Brand 5 (note, it does not make sense to call this a trend as the *x*-axis is categorical). We also note that power consumption is highest at humidity level 4.  Visually it does appear that Brand 5 likely has the most power consumption while Brand 1 has the lowest consumption.
+
+We proceed with a One-Way Block ANOVA, we are building the following model:
+
+$$Y_{ij} = \mu + \tau_i + \beta_j + \varepsilon_{ij}$$
+
+where
+
+* $Y_{ij}$ is the power consumption for Brand $i$ in humidity level (block) $j$.
+* $\mu$ is the overall mean
+* $\tau_i$ is the effect of Brand $i$ on the mean response
+* $\beta_j$ is the effect of humidity level $j$ on the mean response
+* $\varepsilon_{ij}$ is the underlying random noise
+
+We can reformulate our hypothesis test as follows:
+
+$$H_0: \tau_1 = \tau_2 = \tau_3 = \tau_4 = \tau_5 = 0 ~~~\textrm{versus}~~~ H_a: \textrm{at least one } \tau_i \neq 0$$
+
+**IMPORTANT NOTE!!** In R, when performing a block design, we must list the block term **first** after the `~` in the `aov` statement.
+
+```{r}
+correct.analysis <- aov(Power ~ Humidity + Brand, data=humidity)
+```
+
+That's it! We are telling R to model `Power` as a function of `Humidity` and `Brand`. Before performing inference we check the residuals.
+
+```{r}
+autoplot(correct.analysis)
+```
+
+Again, everything looks okay with the residual analysis. There is some minor wonkiness in the variability but nothing systematic, so we proceed with formal inference:
+
+```{r}
+summary(correct.analysis)
+```
+
+You'll note that R automatically reports a $p$-value for the Humidity factor. This is a known effect, so ignore that result!!! We do not care if it is significant or not, as it is a confounding factor and not of interest to the hypothesis we are testing.
+
+We see that `Brand` does have an influence on power consumption ($F$-stat = 95.57 on 4 and 12 degrees of freedom, resulting in a $p$-value$\approx 10^{-9}$). 
+
+Since a difference between Brands has been detected, we can perform a multiple comparison procedure to weed out where the differences are.  Since the purpose of the study was to assess the claim that Brand 1 has lower true mean power consumption than the other brands, a **Dunnett multiple comparison** is appropriate here treating Brand 1 as the "control" (CIs provided).
+
+```{r}
+Dunnett.Brand <- emmeans(correct.analysis, "Brand")
+contrast(Dunnett.Brand, "trt.vs.ctrl", ref=1)
+```
+
+
+```{r}
+confint(contrast(Dunnett.Brand, "trt.vs.ctrl"))
+plot(contrast(Dunnett.Brand, "trt.vs.ctrl"))
+```
+
+All comparisons are significant at the $\alpha$ = 0.05 level, so **the claim of better mean power efficiency for Brand 1 is supported!**  Moreover, from the CIs we can see that Brand 1's closest competitor (with regard to efficiency) is Brand 3, and Brand 1 consumes between 17.9 to 65.1 fewer kWh on average than Brand 3.
+
+**Morals of the story:**
+
+* The correct statistical analysis to do in a designed experiment is dictated by the design of the experiment itself!
+* Misidentifying the structure of an experimental design can lead to erroneous conclusions about the factors under study.
+
+## In-class Assignment
+
+
+### Potato Data
+
+The following dataset is from a study about the quality of cooked potatoes using various cooking methods and measures of quality. The data source is
+
+A. Mackey and J. Stockman (1958). "Cooking Quality of Oregon-Grown
+Russet Potatoes", *American Potato Journal*, Vol.35, pp395-407.
+
+There are several variables in this data set, but for today,\ we are going to focus on just a few of them. We will look to investigate the effect of storage time on the flavor score of different potatoes. However, it is a well known fact that the cooking method will influence the flavor (who doesn't love a good french fry?), so we want to use the cooking method as a blocking variable. The cooking methods are as follows:
+
+1 = Boil <br>
+2 = Steam <br>
+3 = Mash <br>
+4 = Bake at 350 degrees F <br>
+5 = Bake at 450 degrees F
+
+and the storage periods are:
+
+1 = 0 months storage <br>
+2 = 2 months storage <br>
+3 = 4 months storage <br>
+4 = 6 months storage
+
+
+### Data Entry
+
+Notice we are using a slightly different method to read the data today (called `read.table`) since our data set is a text file, not a CSV file. 
+This data file does not include variables names, so we add them.
+
+```{r}
+
+potato <- read.table("potato.txt")
+names(potato) <- c("GrowArea", "Temp", "Size", "StorageTime", "CookingMethod",
+                    "TextureScore", "FlavorScore", "MoistnessScore")
+glimpse(potato)
+```
+
+#### Question 1: Data Cleaning
+
+First, create a reduced data set that only contains the variables we need. You should also make sure factor variables are not being treated as numeric. (For cooking method and storage times, set the factor labels to something more meaningful).
+
+```{r}
+potato <- potato %>%
+  mutate(StorageTime =   factor(StorageTime,   1:4, labels=c("0 months storage", "2 months storage", "4 months storage", "6 months storage")),
+         CookingMethod = factor(CookingMethod, 1:5, labels=c("Boil", "Steam", "Mash", "Bake at 350 degrees F", "Bake at 450 degrees F")))
+
+potatofiltered <- potato %>% select(StorageTime, CookingMethod, FlavorScore)
+
+glimpse(potatofiltered)
+
+```
+
+
+#### Question 2: EDA
+
+Create a profile plot that shows the average flavor score for each storage period when adjusting for the cooking method. You should end up with a plot with 5 lines. Describe any relationships you see in this plot.
+
+```{r, message=FALSE}
+potatomean <- potato %>% 
+  group_by(CookingMethod, StorageTime) %>%
+  summarize(Mean=mean(FlavorScore),
+            SD=sd(FlavorScore),
+            N=n())
+
+ggplot(potatomean) + 
+  geom_line(aes(x=StorageTime, y=Mean, col=CookingMethod, group=CookingMethod)) + 
+  geom_point(aes(x=StorageTime, y=Mean, col=CookingMethod), size=3) +
+  theme_bw()
+```
+**Bake at 450F has a strong decline of flavor between four and six months after increasing the initial four months. Boiling and Baking at 350F have similar progression over time all increasing in flavor. Finally, steaming and mashing the potatos have a similar progression over time with the flavor initially rising the first two months then slowing decreasing over the next four.**
+
+#### Question 3: ANOVA model fit
+
+Run the one-way block ANOVA to test the effect of storage time on flavor score blocking for cooking method. Be sure to check your assumptions (i.e., constant variance, normality) with residual plots and explain your results!
+
+```{r, warning=FALSE}
+potato.analysis <- aov(FlavorScore ~ CookingMethod + StorageTime, data=potato)
+summary(potato.analysis)
+```
+**For storage time, we have an F stat of 5.596 and 3 and 12 degrees of freedom. With a p value of 0.0123, there is significant evidence that the storage time effects the flavor score. With the cooking method's pvalue being blow 0.05 (0.0756), we can say that there is significant evidence that the cooking method does not have an influence on the flavor value. Since our question is "Does storage time affect flavor value" we will not have to do a follow up multiple comparisons test.**
+**ASSUMPTION CHECK HERE** 
+
+```{r}
+autoplot(potato.analysis)
+```
+**The data seems to fits all assumptions. The data is normal as it stays pretty close to the line. The residual and scale plots have nothing wrong either.**
+
+
+
+#### Question 4: Multiple Comparisons
+
+Run the tests for multiple comparisons (only if necessary).
+
+**Based on our results we can see that difference is significant between 0-2 months, 0-4 months, and 0-6 months.**
+
+```{r}
+potato.mc <- emmeans(potato.analysis, "StorageTime")
+contrast(potato.mc, "pairwise")
+```
+
+

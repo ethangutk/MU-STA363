@@ -1,0 +1,359 @@
+---
+title: "Class 11: Assumption Checking in Regression"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(GGally)
+library(lindia)
+library(ggfortify)
+```
+
+## Goals
+
+When fitting a linear regression model we make a big and important assumption: the relationship between the predictors and response variable is linear! This is in addition to our other assumptions, independence, constant variance and normal data.
+
+Today we look at how you can adjust a model to satisfy the underlying assumptions, but that can come with a substantial contextual cost!
+
+
+### Example: Supervisors data
+
+In a study of 27 industrial establishments of varying size, the number of supervised workers and the number of supervisors were recorded.  The goal of the study was to address supervisor needs in industries similar to those sampled, and to develop a model to relate (and ultimately, predict) supervisor needs for a given sized workforce.  The data appear in the text file `supervisors2020.txt`.
+
+Read in the data and take a quick look:
+
+```{r}
+supdata <- read.table("supervisors2020.txt", header=TRUE)
+kable(head(supdata))
+```
+
+Which variable plays which role?
+
+* The **predictor variable** ($X$) in this scenario is:  *DISCUSS HERE*
+* The **response variable** ($Y$) in this scenario is : *DISCUSS HERE*
+
+Since there is only one predictor variable, we start with a simple scatterplot of the data to visually investigate the nature of the relationship:
+
+```{r}
+ggplot(supdata, aes(x=n.workers, y=n.supervisors)) +
+  geom_point() + 
+  xlab("Number of Workers") +
+  ylab("Number of Supervisors") +
+  theme_bw()
+```
+
+**Question:** Based on the above, does it appear as though a simple linear regression model $Y = \beta_0 + \beta_1 X_1 + \varepsilon$ will be adequate to explain the relationship between the size of the supervisor force and size of the work force?  
+
+*DISCUSS HERE*
+
+Of course, we can get the scatterplot, along with other information, using the `ggpairs()` function.
+
+```{r}
+ggpairs(supdata) +
+  theme_bw()
+```
+
+Here, we add on the `theme_bw()` layer just to demonstrate that the resulting plot is a `ggplot`, and thus can be edited in the usual way (`theme_`, `labs()`, etc...)
+
+In summary
+
+* There appears to be a strong positive linear relationship
+   - The correlation between the number of workers and number of supervisors is `r round(cor(supdata)[1,2], 4)`.
+* There appears to be some fanning in the relationship (more variability at higher levers of workers and supervisors).
+* Both the number of workers and supervisors shows some right skewness in the plots.
+
+
+--------------
+
+#### Assumptions for linear regression
+
+The assumptions are important for when we use the model for inference and prediction later, so we need to check them up front.  The assumptions are much the same as for the ANOVA models that we had before, but with one important addition:
+
+1. **Independence**: The $\varepsilon$ terms are independent (i.e. the residuals are independent).
+2. **Homogeneous error variance**: The variance of the $\varepsilon$ terms are constant regardless of the values of the predictor variables.
+3. **Normality**: The $\varepsilon$ terms are Normally distributed.
+
+...and one important new one:
+
+4. **Linearity**: The form of the model being fit is appropriately specified.
+
+The last assumption is new because we have choices in model specification now, so we need to choose judiciously.  Is a **linear** model appropriate for the given data? We can add a **smoother** to get a better sense of the trend suggested by the data themselves:
+
+```{r, message=FALSE}
+ggplot(supdata, aes(x=n.workers, y=n.supervisors)) +
+  geom_point() + 
+  geom_smooth() +                 # adds a smoother
+  xlab("Number of Workers") +
+  ylab("Number of Supervisors") +
+  theme_bw()
+```
+
+*WHAT DO WE SEE?*
+
+The linearity assumption can be formally checked by looking at the *Residuals vs Fitted values* plot, and seeing if there is any systematic trend remaining in the residuals.  **If the model has been reasonably well specified, there should be no "trending" left in the residuals** (which by definition, are the "leftovers" after fitting the model!).
+
+Let's check the linear regression model fit to the observed data values, and check the assumptions:
+
+```{r, warning=FALSE}
+fit1 <- lm(n.supervisors ~ n.workers, data=supdata)
+autoplot(fit1)
+```
+
+We see evidence of non-linearity...see how the Residuals vs Fitted plot shows clear curvature.  So it appears that $X$ does not relate linearly to $Y$ here!  So a straight-line model is probably not a good choice.  
+
+The residuals also exhibit non-homogeneous variance (violation of Assumption 2).  This can often be addressed by trying a **Box-Cox power transformation** on the $Y$ variable.  **See textbook section 8.3**. Box-Cox looks at the data and determines a power $\lambda$ to raise the response variable $Y$ to in order to "tame" the problem.  Box-Cox is available in the `lindia` library, using the function `gg_boxcox`:
+
+```{r}
+library(lindia)
+gg_boxcox(fit1)      # use fit1 from above
+```
+
+We note that anywhere from no transformation ($\lambda=1$) is suggested to raising the response to the power $0.2$. We also see that the peak of the curve is fairly close to a $\lambda$ value of around 0.5.  This is the square root transformation, so we decide to instead use $\sqrt{Y}$ (i.e. $\sqrt{n.supervisors}$) as the response variable. **Note:** the choice here is as much an art as a science -- we picked the square root, but you could justify a cubed root transformation ($\sqrt[3]{}$) or no transformation at all (although that would not address the propsective assumption issues).
+
+So now, fit this transformed model and recheck the residuals:
+
+```{r, warning=FALSE}
+fit2 <- lm(sqrt(n.supervisors) ~ n.workers, data=supdata)
+autoplot(fit2)
+```
+
+The fanning in the residuals has been greatly reduced (the normality is also much better ... these often go hand-in-hand). 
+
+**But the drastic non-linearity still exists.**  So what can we do?  We can try transforming the $X$ variable to address non-linearity.  Looking at the original scatterplot (curvature in the relationship) and remembering a little bit about algebraic functions can be useful here.  A square root transformation on $X$ might be a good choice to start:
+
+```{r, warning=FALSE}
+fit3 <- lm(sqrt(n.supervisors) ~ sqrt(n.workers), data=supdata)
+autoplot(fit3)
+```
+
+This appears to be a bit better than using just `n.workers` but we still see a little bit of curvature in the residuals versus fitted plot. Recall from the `ggpairs()` output, the `n.workers` variable is right skewed and has some very large values ($>1300$) compared to others in the lower-100s. When we $\sqrt$ those data, we are essentially pushing the larger values down closer to the smaller values. Perhaps we can push it down even further?
+
+```{r, warning=FALSE}
+fit4 <- lm(sqrt(n.supervisors) ~ log10(n.workers), data=supdata)
+autoplot(fit4)
+```
+
+This appears to be better ... still not "textbook" great, but we have addressed a big part of the assumption problems through transformation. Let's look at a scatterplot of the transformed data to see if it appears "linear".
+
+```{r, message=FALSE}
+ggplot(supdata, aes(x=log10(n.workers), y=sqrt(n.supervisors))) + 
+  geom_point() +
+  geom_smooth()
+```
+
+This appears to be a reasonably linear. 
+We could continue to try other transformations on both the predictor and response variables to see if we can do even better, but for now we settle on the model form
+
+$$\sqrt{n.supervisors} = \beta_0 + \beta_1 \log_{10}(n.workers) + \varepsilon$$
+
+Once satisfied with the model form, we then look at the coefficient estimates and residual standard error:
+
+```{r}
+summary(fit4)    # model fit summary
+```
+
+*INTERPRETATIONS?* Not so easy with transformed variables!
+
+* The **residual standard error** (see textbook section 5.2) here is $s$ = `r round(summary(fit4)$sigma, 4)`. Note that **this is in the units of this model's form of the response variable**, which is now square root units. This makes interpretation difficult (in the untransformed model, `fit1`, the residual standard error is `r round(summary(fit1)$sigma, 4)`.), especially since the predictor variable is also transformed here. 
+* The $\beta$-coefficient estimate for the predictor is $b_{1}$ = `r round(coef(fit4)[2], 4)`.  So for each additional $\log_{10}$ unit of `n.workers`, we expect that the square root of `n.supervisors` will increase by `r round(coef(fit4)[2], 4)`.  (Not very intuitive, is it?)
+
+#### In summary...
+
+Transformations can help satisfy assumptions underlying to inference, but they can present interpretive challenges of their own that we have to deal with.  Often, one needs to think about balancing the trade-off between these challenges and the benefits offered by doing transformations at all.  There is a bit of an art in doing all this.
+
+
+
+
+## In-class Assignment
+
+Data was collected from the 2019 United States Census Bureau American Community Survey (ACS), the 2017 FBI Uniform Crime Reporting database (UCR), the 2017 US Department of Agriculture farming Census, results from the 2020 general election, Unemployment numbers from the Bureau of Labor Statistics, Mask wearing survey data from the New York Times and COVID-19 Coronavirus cases and deaths (from USA  Facts, a not-for-profit nonpartisan civic initiative providing government data) for each county/parrish in the United States and Washington, D.C. The combined data includes the following variables
+
+
+* `countyFIPS` - The five character numeric FIPS code uniquely identifying the county
+* `CountyName` - The name of the county/parrish
+* `State` - The two character abbreviation for the State
+* `stateFIPS` - The two character numeric FIPS code uniquely identifying each state
+* `Area` - The geographic area of the county, in squared miles
+* `Total_cases` - The total number of COVID-19 cases reported for the county as of DATE
+* `Total_deaths` - The total number of COVID-19 related deaths reported for the county as of DATE
+* `pop` - The estimated population for the county in the year 2019
+* `age` - The median age of county residents, estimated in the year 2019
+* `income` - The median household income within the county, estimated in 2019
+* `PercCitizens` - The percentage of residents in the county that are US citizens, estimated in 2019
+* `PercCollege` - The percentage of residents in the county with a college degree (Associates or higher), estimated in 2019
+* `PercVets` - The percentage of residents in the county that are veterans of the US armed forces, estimated in 2019
+* `PercHealth` - The percentage of residents in the county that has some form of health insurance (including Medicare and Medicaid), estimated in 2019
+* `per_gop` - The proportion of residents in the county that voted for President Donald Trump in 2020
+* `per_dem` - The proportion of residents in the county that voted for President Joe Biden in 2020
+* `Unemployment_rate` - The estimated county-level unemployment rate in November 2020 (seasonally unadjusted)
+* `HighMaskUsage` - An estimate of the proportion of county residents who "always" or "mostly always" wear a mask while in public, based on a New York Times Survey in September 2020.
+* `Corn` - The amount of Corn harvested in the county, in acres, according to the 2017 USDA census
+* `Soy` - The amount of Soybeans harvested in the county, in acres, according to the 2017 USDA census
+* `Vegetables` - The amount of Vegetables (Broccoli, Beans, etc…) harvested in the county, in acres, according to the 2017 USDA census
+* `officers_killed_by_felony` - The number of police officers killed during the course of felony in 2018
+* `officers_assaulted` - The number of police officers assaulted during the course of their jobs in 2018
+* `violent_crime` - The total number of recorded violent crimes in 2018
+* `property_crime` - The total number of property crimes in 2018
+
+Note: FIPS is the Federal Information Processing Standards mechanism for uniquely identifying states, counties and other regions.
+
+## Goals for this assignment
+
+#### Statistical Goals
+
+The assignment for today is designed to give you practice at fitting linear models in R and performing some basic transformations on variables to see how you can potentially *improve* models.
+
+This assignment will also provide additional practice to perform some data wrangling.
+
+#### Contextual Goals
+
+We will look at building a model to help explain Coronavirus case rates across the contiguous United States. Please note that in STA 363 we attempt to use real and relevant datasets as much as possible. This assignment will not lead to *causal* arguments about what variables cause more Coronavirus, nor should any results from today lead to broad conclusions about policy, politics, health or safety. We are only using a few of the variables in this large dataset and, like many real-world problems, the "system" (Coronavirus, human behavior, government policy, etc...) is more complicated than the simplified data provided. This data includes the cumulative Coronavirus counts and deaths as 07 November 2020 from the USA Facts website.
+
+## Part 1 - Data Wrangling
+
+The below code chunk reads in the data and saves it as `us_county_data_raw`.
+
+```{r, warning=FALSE, message=FALSE}
+us_county_data_raw <- read.csv("usCountyCoronaVirusData_2020-11-07.csv")
+```
+
+In the below chunk, do the following:
+
+* Create the following variables (giving contextually meaningful variable names) using a single `mutate`:
+   + The **Population Density**, defined as the Population divided by the geographic area of the county.
+   + The **Property crime rate**, defined as the number of property crimes per 1000 residents (property_crimes/pop*1000)
+   + The cumulative **Coronavirus case rate**, defined as the number of Coronavirus cases per 1000 residents
+* Filter the data such that counties from outside the contiguous United States are removed; that is, remove records from the states Alaska (AK) and Hawaii (HI).
+* Select the following variables for analysis:
+   + Median age of the county
+   + Percentage with a college degree
+   + Population density
+   + Percent of the electorate who voted for President Joe Biden
+   + Property crime rate
+   + Coronavirus rate
+* Call this new dataset `county_data`
+   
+```{r}
+# Add the factors needed for the data set
+county_data <- us_county_data_raw %>%
+  mutate(PopulationDensity = as.factor((pop/Area)*1000),
+         PropertyCrimeRate = as.factor((property_crime/pop)*1000),
+         CoronavirusCaseRate = as.factor(Total_cases/1000))
+
+# Filter the states by NOT Alaska and Hawaii
+county_data <- county_data %>% 
+  filter(!State %in% c("AK", "HI"))
+
+summary(county_data)
+```
+
+## Part 2 - EDA
+
+This code builds a scatterplot matrix of the processed data (once you remove the comment symbol #). Describe any systematic patterns you see in the relationships between variables. Also comment on the supplied density plots along the diagonal for several of the variables' distributions.
+
+```{r, warning=FALSE, message=FALSE}
+
+```
+
+**Discussion here**
+
+
+## Part 3 - Initial Linear Model
+
+This code fits a linear regression where you model the county Coronavirus rate as a function of median age, the percentage with a college degree, the percentage who voted for President Biden, the population density, and the property crime rate. *You may need to adjust the variable names based on the names you created in Part 2.* Check the diagnostic residual plots and discuss whether the underlying regression assumptions are met.
+
+```{r, warning=FALSE, message=FALSE}
+# fit_part3 <- PUT MODEL HERE
+
+# Check assumptions
+```
+
+**Discussion here**
+
+
+## Part 4 - Addressing zero observations. 
+
+You should note from part 3 there are major violations to our underlying assumptions (linearity, constant variance and normality). We will look to transform some of the variables beginning with the response variable, however we have a statistical problem ... a few counties have reported zero Coronavirus cases. In fact, excluding Hawaii and Alaska the following counties have reported no coronavirus cases as of November 7, 2020.
+
+```{r}
+us_county_data_raw %>%
+   dplyr::filter(!State %in% c("HI", "AK"),
+                 Total_cases==0) %>%
+   dplyr::select(CountyName, State, Area, pop)
+```
+
+Both are very rural (low populations for geographic size). Although zero Coronavirus cases is a good thing in context, mathematically it causes some trouble when performing Box-Cox transformations (recall, $\lambda=0$ means log, and $\log(0)$ is undefined!).
+
+Build a linear model similar to that in part 3 but where the response is the Coronavirus case rate plus 1 (i.e., `(Corona_rate + 1)` or something similar).
+
+Compare that fitted model to the one fitted in part 3. Discuss if adding a constant value to the response is a problem for contextual reasons.
+
+```{r, warning=FALSE, message=FALSE}
+#fit_part4 <- PUT MODEL HERE
+
+# This line can help you compare the two models:
+#cbind(coef(fit_part3), coef(fit_part4) )
+```
+
+**Discussion here**
+
+
+## Part 5 - Box-Cox transformation
+
+Construct a Box-Cox transformation plot for the model from part 4, what transformation does it recommend?  Perform that transformation on the `(Coronavirus_rate+1)` variable and refit the model, and assess the assumptions of the new fitted model.
+
+```{r, warning=FALSE, message=FALSE}
+gg_boxcox(fit_part3)
+```
+
+**Discussion here**
+
+```{r part5_model, warning=FALSE, message=FALSE}
+
+```
+
+**Discussion here**
+
+
+## Part 6 - Log-transformed response
+
+You should note that the Box-Cox results in part 5 suggest a fairly small $\lambda$ value. Zero is not included in the given interval but is not too far away either. A $\lambda$ of zero would suggest a **logarithmic transformation** be performed. Log-transforms *tend to be preferred* over other power transformations as they are easier to interpret (comparing the value of 2 to 1 on a $\log_{10}$ scale is an order a magnitude whereas comparing 2 to 1 when things are raised to the power 0.3333, or cubed-root, is awkward at best).
+
+Fit a linear model where the response plus 1 has been transformed with a $\log_{10}$; i.e., `log10(Coronavirus_rate+1)`. Compare the residual plots of this plot to that of part 5 in its ability to meet the underlying assumptions.
+
+```{r part6, warning=FALSE, message=FALSE}
+
+```
+
+**Discussion here**
+
+
+## Part 7 - Scatterplot with transformed response
+
+Make a copy of the data (call it `county_data2` or something similar) and mutate the Coronavirus case rate so that it is now the cubed root of the Coronvirus case rate plus one.  Make a scatterplot matrix of this version of the data (with the transformed response).  Comment on any relationship and behaviors you see.
+
+```{r part7, warning=FALSE, message=FALSE}
+
+```
+
+**Discussion here**
+
+
+## Part 8 - Log-transformed predictors
+
+You should note in part 7 that two of the *predictor* variables are still heavily skewed. Perform a $\log_{10}$ transformation on these variables (within the `county_data2` dataset). Note: some of the counties report no property crimes, so for those you need to take a logarithmic transformation on the property crime rate plus one.
+
+Construct a scatterplot matrix on this data. How does this change the distribution of these predictors, and how can this be helpful when analyzing the results?
+
+```{r part8, warning=FALSE, message=FALSE}
+
+```
+
+**Discussion here**
+
+
+

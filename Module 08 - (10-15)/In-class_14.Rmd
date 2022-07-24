@@ -1,0 +1,343 @@
+---
+title: "Class 14: Reduced-model *F*-test and Categorical Predictors in Regression"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(GGally)
+library(lindia)
+library(ggfortify)
+```
+
+
+
+# Multiple Regression Example: Crime rates
+
+State-level crime rate data is provided for all US states and the District of Columbia for the year 2008.  All crime rates are epressed as number of crimes per 100,000 residents.  We are interested in variables that are related to the burglary rate.  The data appear in the CSV file `stateCrimeData.csv`. The variables in the data set are:
+
+* `Pop` - Population by state (2008)
+
+Crime variables:
+
+* `Murder` - Murder and non-negligent manslaughter rate (2008)
+* `Rape` - Forcible Rape rate (2008)
+* `Robbery` - Robbery rate (2008)
+* `Assault` - Aggravated Assault rate (2008)
+* `Burglary` - Burglary rate (2008)
+* `VehTheft` - Vehicle Theft rate (2008)
+
+Demographic Variables:
+
+* `UnEmp` - Unemployment Rate (2010)
+* `HSGrad` - Percentage of adult population that graduated from high school (2005)
+* `CollGrad` - Percentage of adult population that graduated from college (2005)
+* `MedianInc` - Median Income for Family of 4 (2005)
+
+Crime Related Expenitures: 
+
+* `Police` - Police Expenditures (2005)
+* `Judicial` - Judicial Expenditures (2005)
+* `Corrections` - Corrections Expenditures (2005)
+
+Consider the following code we have seen before: 
+
+```{r}
+states <- read.csv("stateCrimeData.csv")
+
+crimedata <- states %>%
+  filter(state != "District of Columbia") 
+```
+
+
+### Fit our original model
+
+In previous lectures, we fit the following model to the data:
+
+```{r}
+crimefit1 <- lm(Burglary ~ Pop + HSGrad + CollGrad + UnEmp + MedianInc, data=crimedata)
+summary(crimefit1)
+```
+
+In previous classes, we checked the residuals for the linearity, constant variance and normality assumptions. There were some concerns but overall we proceeded with inference since the residual plots looked reasonable. We see the following results:
+
+* With an $F$-stat of 9.29 on 5 and 44 degrees of freedom ($p$-value$\approx 10^{-6}$) we have evidence that at least one $\beta_i \neq 0$, or in context, some combination of Population, High School Graduation Rate, College Graduation Rate, Unemployment and Median Income predicts Burglary rates. Recall that this test compares the competing hypotheses:
+    + $H_0:\ Burglary = \beta_0 + \varepsilon$
+    + $H_a:\ Burglary = \beta_0 + \beta_1(Population) + \beta_2(HSGrad) + \beta_3(CollGrad) + \beta_4(UnEmp) + \beta_5(MedianInc) + \varepsilon$
+    + Which can be phrased as $H_0:\ null~model ~~\mbox{vs}~~H_a:\ more~complex~model$
+* We see that the linear model containing Population, High School Graduation Rate, College Graduation Rate, Unemployment and Median Income explains approximately 45\% of the variability in Burglary rates based on adjusted $R^2$.
+* The following are true about the individual predictors variables:
+    + `Pop` is NOT a significant predictor, given `HSGrad`, `CollGrad`, `UnEmp` and `MedianInc` are in the model
+    + `HSGrad` is a siginificant predictor, given `Pop`, `CollGrad`, `UnEmp` and `MedianInc` are in the model
+    + `CollGrad` is NOT a significant predictor, when `Pop`, `HSGrad`, `UnEmp` and `MedianInc` are in the model
+    + `UnEmp` is a significant predictor given `Pop`, `HSGrad` and `CollGrad` and `MedianInc` are in the model
+    + `MedianInc` is a significant predictor given `Pop`, `GSGrad`, `CollGrad` and `UnEmp` are in the model
+
+Look back at the original variables in the dataset. There is Population (we considered it), a collection of different crime rates (we analyzed burglary), demographic variables (we considered all 4 included variables) and expenditure measurements (we did not consider any). **Below we consider the set of expenditure variables collectively.**
+
+----
+
+## Reduced model $F$-test
+
+In the above, we found that some combination of Population, High School Graduation Rate, College Graduation Rate, Unemployment and Median Income predicts Burglary rates. After looking at available variables, we may ask, **does some combination of expenditure measurements improve the model?**
+
+Statistically, we can address this question using a hypothesis test described in one of a few ways:
+
+* Model comparisons:
+    + $H_0:\ Burglary = \beta_0 + \beta_1(Population) + \beta_2(HSGrad) + \beta_3(CollGrad) + \beta_4(UnEmp) + \beta_5(MedianInc) + \varepsilon$
+    + $H_a:\ Burglary = \beta_0 + \beta_1(Population) + \beta_2(HSGrad) + \beta_3(CollGrad) + \beta_4(UnEmp) + \beta_5(MedianInc) + \beta_6(Police) + \beta_7(Judicial) + \beta_8(Corrections) + \varepsilon$
+* Equivalent, but alternatively framed in terms of parameters,
+    + $H_0:\ \beta_6 = \beta_7 = \beta_8 = 0$
+    + $H_a:\ \textrm{at least one } \beta_i \neq 0, i=6,7,8$
+
+Take a second and look at the above formulations and note how they connect to one another.
+
+We can test this hypothesis using a special case of an ANOVA $F$-testing called a **reduced model $F$-test** (or **reduced $F$-test**, **partial $F$-test**). First, we fit a second model with the addition of the expenditure variables.
+
+```{r}
+crimefit2 <- lm(Burglary ~ Pop + HSGrad + CollGrad + UnEmp + MedianInc + Police + Judicial + Corrections, data=crimedata)
+```
+
+You'll note the model `crimefit1` is a special case, or subset, of `crimefit2` where several of the parameters happen to be 0. This corresponds the hypotheses outlined above. We then compare the two models using the `anova()` function:
+
+```{r}
+anova(crimefit1, crimefit2)
+```
+
+We see an $F$-stat of 0.2782 on 3 and 41 degrees of freedom, $p$-value=0.8408. So we fail to reject the null hypothesis -- we do NOT have evidence that expenditures will improve upon our model. 
+
+For further insight, let's consider the `summary` output.
+
+```{r}
+summary(crimefit2)
+```
+
+Note the following
+
+* Overall, this model does significantly predict burglary rates ($F$-stat of 5.625 on 8 and 41 degrees of freedom, $p$-value=$10^{-5}$).
+* The model explains approximately 43\% based on adjusted $R^2$.  Note this value has gone down compared to the simpler model!
+* All three of the expenditure variables are insignificant when considered with the other variables.
+* The `MedianInc` variable is now only weakly significant (its $p$-value changed from the previous fit).
+
+Overall it appears that accounting for these expenditures does not improve the model's ability to predict burglary rate.
+
+### An Aside
+
+The overall ANOVA $F$-test to determine if any of the predictor variables is significant, provided in the `summary()` output for an `lm` object in R, really a special case of the reduced $F$-test. We can see this below.
+
+First fit a *null model*, or intercept only model:
+
+```{r}
+crime_null <- lm(Burglary ~ 1, data=crimedata)
+```
+
+#### An aside of the aside
+
+Take a quick look at the intercept only model
+
+```{r}
+summary(crime_null)
+```
+
+Note, the mean of the `Burglary` variable
+
+```{r}
+crimedata %>%
+  summarize(Mean_Burglary = mean(Burglary))
+```
+
+
+The mean and the intercept match! The *null model*, or intercept only model, is just the sample mean of the response variable `Burglary`. 
+
+#### Back to the $F$-test
+
+So, another way to perform the overall $F$-test for the first model we fit, `crimefit1`
+
+```{r}
+anova(crime_null, crimefit1)
+```
+
+We see a familar result, an $F$-stat of 9.29 on 5 and 44 degrees of freedom ($p$-value$\approx 10^{-6}$) shows that the more complicated `crimefit1` model improves over the null model, `crime_null`.
+
+
+
+
+
+----
+
+## Categorical Variables
+
+In a previous problem (patient satisfaction at a hospital), we looked at including a binary gender variable in the model. Let's do something similar here. Maybe if we *grouped* states based on the **total** expenditures they will predict the burglarly rates. Consider the following code:
+
+```{r}
+crimedata <- crimedata %>%
+  mutate(Total.Exp = Police + Judicial + Corrections)
+exp.median <- crimedata %>%
+  summarize(Median = median(Total.Exp))
+crimedata <- crimedata %>%
+  mutate(Exp.Rank = case_when(Total.Exp > exp.median$Median ~ "Top 50",
+                              Total.Exp <= exp.median$Median ~ "Bottom 50") )
+class(crimedata$Exp.Rank)
+```
+
+1. The first part creates a new variable `Total.Exp` corresponding to the total expenditures
+2. The second part determines the median total expenditures based on all 50 states
+3. The third part groups states into one of two categories based on their total expenditures
+4. Lastly we see that the `Exp.Rank` variable is a **character variable**.
+
+Now consider the following model fit:
+
+```{r}
+crimefit3 <- lm(Burglary ~ Exp.Rank, data=crimedata)
+summary(crimefit3)
+```
+
+Some important questions:
+
+* **How does R treat the variable `Exp.Rank`?**  As a dummy variable where it sets "Bottom 50" as 0, and "Top 50" as 1, determined by expeditures.
+* **How do we interpret the coefficient on `Exp.Rank`?** The effect on the average Burglarly rate by being in the top 50\% in terms of expenditures.
+* **How do we interpret the intercept term?** More on that below.
+
+**Details on the above**
+
+* There is a single predictor called `Exp.RankTop 50` which corresponds to states in the upper 50\% in terms of total expenditures. Essentially we are fitting the model
+
+$$Burglary = \beta_0 + \beta_1(Top~50) + \varepsilon$$
+
+where here the variable `Top 50` is a 1 if the state is in the upper 50\% and a 0 if in the lower 50\%. Thus we can consider this model to really be an expression of two different models based upon the level of expenditures:
+
+$$\begin{array}{ccc}
+\hline
+\textbf{Expenditures} & \mathbf{X} & \textbf{Model for mean response} \\
+\hline
+Bottom ~50\% & 0 & \mu_{bot50} =  \beta_0 + \beta_1(0) = \beta_0 \\
+Top ~50\% & 1 & \mu_{top50} = \beta_0 + \beta_1(1) = \beta_0 + \beta_1 \\
+\hline
+\end{array}$$
+
+It's easy to see that the $\beta_0$ coefficient will serve as the parameter representing the true mean burglary rate for states in the bottom 50% of expenditures (here, estimated to be 669.3 burglaries per 100,000 residents).  Close inspection reveals that the $\beta_1$ coefficient measures the influence that being in the top 50\% of expenditures has on burglary rates, i.e. the **change in mean burglary rate between states in the bottom 50% of expenditures and states in the top 50% of expenditures.** So we see the following:
+
+* Being in the top 50\% of expenditures is associated with a 32.39 increase in burglary rates
+   + This is an association, not a causal relationship! *Are there more burglaries because of more expenditures, or more expenditures because of more burglaries?*
+   + This is not a significant association! The $\beta_1$ coefficient on `Exp.RankTop 50` is not significant.
+
+### Aside
+
+It is worth noting that in the above model with a single dichotomous categorical predictor variable, we are essentially performed a two-sample $t$-test using linear regression. Note the $t$-test value (in absolute value) and $p$-value associated with $\beta_1$ matches that below. Also, the `(Intercept)` in our fitted regression (interpreted as the mean of Burglary rate for the bottom 50% of states in terms of expenditures) matches the mean for the Bottom 50% group.
+
+```{r}
+t.test(Burglary ~ Exp.Rank, data=crimedata, var.equal=TRUE)
+```
+
+
+
+## In-class Assignment: COVID data revisit
+
+Now we will add some complexity to the Corona Virus models, while also incorporating some *data science* type elements (merging of multiple datasets). Each of the 50 United States has been classified into one of 4 census regions:
+
+![United States Census Regions.](https://www.cdc.gov/surveillance/nrevss/images/us_map4.png)
+
+The file `censusRegions.csv` contains a mapping of State abbreviation and its corresponding census region. Consider the following:
+
+```{r}
+census <- read.csv("censusRegions.csv")
+glimpse(census)
+
+county_data <- read.csv("usCountyCoronaVirusData_2020-11-07.csv")
+
+county_data <- county_data %>%
+  mutate(Pop_density = pop/Area,
+         Corona_rate = Total_cases/pop*1000) %>%
+  filter(!State %in% c("AK", "HI"))
+
+county_data <- left_join(county_data, census, by="State")
+unique(county_data$Region)
+```
+
+* First, we read in the `censusRegions.csv` file and note it contains two variables `Region` and `State` (which is really an abbreviation).
+* Then, we read in the county-level Coronavirus data file from earlier in-class discussions, and removing Hawaii and Alaska from the data set.  The resulting data we call `county_data` and we have performed some familiar calculations.
+* Ultimately we want to *join* these two data sets together, so... we note the two data sets contain a **common variable** on which to join cases.
+* We then *join* the two data sets. Here we use the `left_join` operation so only observations in the `county_data` are retained (that is, Hawaii and Alaska will be dropped since it is not in the county-level data).
+* Lastly, we look at the `unique` values of the `Region` variable to demonstrate that our joining appears to be successful.
+
+Before building some models, let's recap of the variables in use today.
+
+* `State` - The two character abbreviation for the State
+* `Area` - The geographic area of the county, in squared miles
+* `Total_cases` - The total number of COVID-19 cases reported for the county as of 07 November 2020
+* `Total_deaths` - The total number of COVID-19 related deaths reported for the county as of 07 November 2020
+* `pop` - The estimated population for the county in the year 2018
+* `age` - The median age of county residents, estimated in the year 2018
+* `income` - The median household income within the county, estimated in 2018
+
+Created variables
+
+* `Pop_density` - Population divided by the area, residents per square mile
+* `Corona_rate` - Number of cumulative Coronavirus cases per 1000 residents in the county
+
+-----
+
+
+Now let's model Coronavirus rates as a function of census region. We know from previous work that the response should be transformed, we use a logarithm out of convenience.
+
+```{r}
+regional_corona_model <- lm(log10(Corona_rate+1) ~ Region, data=county_data)
+summary(regional_corona_model)
+```
+
+Note that the model does appear to be useful. With an $F$-stat of `r round(summary(regional_corona_model)$f[1],3)` on `r summary(regional_corona_model)$f[2]` and `r summary(regional_corona_model)$f[3]` degrees of freedom ($p$-value $\approx 0$), the model predicts the logarithm of the Coronavirus rates plus one.
+
+Further, the model explains roughly `r round(summary(regional_corona_model)$adj.r.squared*100, 2)` percent of the variability (based on adjusted $R^2$) in the logarithm of Coronavirus rates.
+
+
+## *Complete the Following* 
+
+With justification based on the output.
+
+
+### Question 1
+
+Interpret the `(Intercept)` term in this model.
+
+**The intercept term is the mean response for the midwest**
+
+
+### Question 2
+
+Interpret the `RegionNortheast` term in this model.
+
+**The north east region is the smallest mean response in the model. We get this term by taking 1.507 (intercept) and subtracting 0.44 (NE Region) equaling 1.066437.**
+
+
+
+### Question 3
+
+What do each of the three $t$-tests imply?
+
+* **The north east has significant evidence that imply it is 0.441 lower rate than the Midwest**
+* **The south does not have significant evidence that it is lower rate than the Midwest rate **
+* **The west has significant evidence that 0.217 lower rate than the Midwest rate**
+
+
+
+
+### Question 4
+
+Does the addition of age, income and the logarithm (base 10) of the population density improve on the model with only the census region? Statistically test using the reduced model $F$-test.
+
+```{r}
+regional_corona_model2 <- lm(log10(Corona_rate+1) ~ Region + age + income + log10(pop), data=county_data)
+anova(regional_corona_model, regional_corona_model2)
+```
+
+**The results give us a P value of 2.2e-16. Based on the results, we can see that these factors have significant evidence that they do play a factor on influencing the data.**
+
+
+
+
+
+
+ 

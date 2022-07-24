@@ -1,0 +1,205 @@
+---
+title: "Class 08: Practice"
+author: "Jing Zhang"
+date: "9/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(emmeans)
+```
+
+## Practice makes perfect
+
+We take a pause on new topics today! Let's work on two problems during class time. You are more than welcome to work with other people. But I would recommend you to work independently first before reaching out to your fellow classmates, instructor or UA. 
+
+
+### 1. Do rats eat more when it is colder? 
+
+A zoologist wishes to determine whether the food intake of rats (unit: 1 gram per day) varies according to the temperature. He randomly assigned 7 rats to each of the three levels of temperature of the environment ("cold", "cool" and "warm"), and recorded their food intake amounts. 
+
+
+
+Describe the following:
+
+* **Experimental Units in this study?**  
+
+*Rats*
+
+* **The factors of interest in this study?**
+
+*Food Intake Amounts*
+
+* **How many factor levels are there?**
+
+*Three different temperatures: Cold, cool, and warm*
+
+* **What are the treatments?**
+
+*Cold, cool, and warm*
+
+* **What other steps were taken to control for nuisance variables and unexplained variability?**  
+
+*He randomly assigned rats each of the three treatments to record the results and replication for each level.*
+
+We begin our analysis by briefly looking at the data. 
+
+
+```{r  }
+rats<-read.csv("https://raw.githubusercontent.com/hellomissingdata/STA363/main/IC08_1.csv")
+head(rats)
+```
+ 
+
+**GOAL.** In this study we are interested in testing if the different temperature has an effect on the food intake of rats.
+
+
+
+#### EDA
+
+What would you do to explore this data set? Comment on the summary statistics or graph you create for the exploration data analysis. 
+
+```{r}
+ggplot(rats) + 
+  geom_boxplot(aes(x=temperature, y=food.intake), col="gray60" ) +
+  geom_jitter(aes(x=temperature, y=food.intake), width=0.1 ) +
+  labs(x="Temperature", y="Food Intake") + 
+  theme_bw()
+```
+
+*Each of the three temperature seems to have the same amount of variance. Overall, they seem to have a similar spread with cold having the largest variance and cool having the smallest.*
+
+#### Analysis
+
+Perform appropriate statistical analysis and make sure that you check your model assumptions!
+
+```{r}
+rats.anova <- aov(food.intake ~ temperature, data=rats)
+autoplot(rats.anova)
+summary(rats.anova)
+```
+
+*The residual vs fitted plot is relatively horizontal, the data is normal based on the Q-Q plot, and the scale location is horizontal. Thus, there is constant variance throughout the data.*
+
+*The F value is 203.4 with 2 and 18 degrees of freedom. Since the P-values of 4.41e-13 is less than 0.05, we can say that there is a significant difference between food intake based on the temperature. Thus, we will do a multiple comparisons tests to find where that difference lies.*
+
+
+#### Multiple Comparisons
+
+Test the multiple comparisons (only if necessary). 
+
+```{r}
+temperature.mc <- emmeans(rats.anova, "temperature")
+plot(contrast(temperature.mc, "pairwise"))
+```
+
+*Since there was no "control" or constant value that we were measuring against, we did the tukey multiple comparisons tests. After performing our test, we can see that all of them are below zero, they are all different from one another.*
+
+
+
+
+
+
+
+
+
+
+
+
+### 2. Does variety of cowpeas impact the yield? Which variety would you recommend?  
+
+
+Students in the Anti-hunger Food Club want to study whether the yield of cowpeas differ among the variety of the plants. So they conducted the following experiment: three varieties of cowpeas were grown in four pots; the four pots were managed by four different staff members and hence the pots were considered as four blocks in the experiments. The dry matter yields were then recorded. 
+
+Describe the following:
+
+* **Experimental Units in this study?**  
+
+*Cowpeas*
+
+* **The factors of interest in this study?**
+
+*Variety/types of cow peas*
+
+* **How many factor levels are there?**
+
+*Three varieties/types of cowpeas*
+
+* **What are the treatments?**
+
+*The three types of cowpeas*
+
+* **What other steps were taken to control for nuisance variables and unexplained variability?**  
+
+*The replication of the experiment *
+
+We begin our analysis by briefly looking at the data. 
+
+```{r}
+cowpeas <- read.csv("https://raw.githubusercontent.com/hellomissingdata/STA363/main/IC08_2.csv")
+head(cowpeas)
+```
+
+**GOAL.** In this study we are interested in testing if the different variety has an effect on the yield of cowpeas.
+
+### Data Cleaning
+
+The first thing we will do is make sure everything is correct in R. Are there any variables in the data recorded as numeric values, but should be treated as categorical information? Please conduct the data cleaning and save the cleaned data set for future analysis. 
+
+```{r}
+ cowpeas <- cowpeas %>%
+ mutate(pot=factor(pot, 1:4, labels=c("Pot 1", "Pot 2", "Pot 3", "Pot 4")))
+```
+
+### EDA
+
+Create a meaningful plot for the data and explain what you observed from this plot. 
+
+```{r}
+ggplot(cowpeas) + 
+  geom_line(aes(x=variety, y=yield, col=pot, group=pot)) + 
+  geom_point(aes(x=variety, y=yield, col=pot), size=3) +
+  theme_bw()
+```
+
+*Pot three and pot two follow a similar trend line with pot 3 being slightly higher than pot 3. Pot four has a decrease between variety A and B but variety C is much higher than the other two. Finally, post 1 gives the lowest yield out of them all with the variety B being the highest out of the three for that pot.*
+
+### Analysis
+
+Perform appropriate analysis. Be sure to check your assumptions!
+
+```{r}
+cowpeas.analysis <- aov(yield ~ variety + pot, data=cowpeas)
+autoplot(cowpeas.analysis)
+summary(cowpeas.analysis) 
+```
+
+*The residual and scale location plot are not linear. The Q-Q plot's points also do not stick to the trend line. Thus, the data does not fit assumptions.*
+
+*We can see that the variety's results show an F value of 7.40 and 2 and 6 degrees of freedom. With a P-value of 0.024, we can see that there is a difference between the variety of cowpeas so we will perform a multiple comparisons test.*
+
+
+### Multiple Comparisons
+
+Test the multiple comparisons (only if necessary). Be sure to account for any interactions present in the data.
+
+```{r}
+temperature.mc <- emmeans(cowpeas.analysis, "variety")
+contrast(temperature.mc, "pairwise")
+```
+
+*We performed a tukey multiple comparisons test since there was no constant control. We can see that A-C is the only difference since it is the only P-value that is under 0.05 (0.0202).*
+
+
+
+
+
+
+
