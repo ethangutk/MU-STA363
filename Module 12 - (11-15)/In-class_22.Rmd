@@ -1,0 +1,281 @@
+---
+title: "Class 22: Statistical Odds"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(gridExtra)
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(leaps)
+library(car)
+library(GGally)
+library(caret)
+```
+
+## Review: 
+
+You have seen several different models, including two sample t-test, one-way ANOVA, one-way block ANOVA, two-way ANOVA, repeated measures ANOVA, linear regression, analysis of covariance (ANCOVA). 
+
+**What kind of model do we use for...**
+
+1) a numerical response with categorical predictors?
+* *ANOVA*
+ 
+
+2) a numerical response with numerical predictors?
+* *Linear Regression*
+
+
+3) a numerical response with numerical and categorical predictors?
+* *Linear Regression/ANCOVA*
+
+
+4) a categorical response with numerical predictors?
+* *Logistic Regression*
+
+
+----
+
+## Statistical odds
+
+**Motivating example: Cancer prevalence.**  A random sample of patient records of 200 men (all of age 60) was collected to investigate the association between number of years smoking and presence of lung cancer. The data are in the file `cancerprev.csv`. The variables in the dataset are:
+
+* `yrssmoke` - Number of years the subject has been a smoker 
+* `cancer` - Indicator variable of whether the subject has cancer (1) or not (0) 
+
+*QUESTIONS:*
+
+* Which variable is the response variable in this problem?  Which is the predictor variable? 
+If they're smokers
+
+* What is fundamentally different about this problem than any regression problem you've encountered to date?
+Number Years Been Smoking
+
+
+**EXERCISE:** Create a scatter plot of the response vs the predictor for the above example.  Then, overlay a linear regression line on the plot. 
+
+```{r}
+cancerprev <- read.csv("cancerprev.csv")
+
+ggplot(cancerprev, aes(x=yrssmoke, y=cancer)) + 
+  geom_point() + 
+  geom_smooth(method="lm") + 
+  theme_minimal()
+```
+
+*QUESTION:* Based on the above, why is a linear regression model inappropriate for these data?   
+
+
+
+
+
+----
+
+### Some Math
+
+When we fit a regression model in all our previous problems, we are essentially modeling **the mean outcome of a response variable measured on a continuous scale**.  The idea of regression is that this mean response can possibly be affected or influenced by other variables (i.e. the predictor variables).  Mathematically, up to this point the models have been
+
+$$\mu = E(Y) = \beta_0 + \beta_1X_1 + ... + \beta_pX_p$$
+
+where $Y$ is normally distributed with mean $\mu | X_1, X_2, ..., X_p$ and constant variance $\sigma^2$ (that's why we were always checking assumptions of normality, constant variance, etc). However, in the above cancer prevalence problem, the response is not a measured variable on a continuous scale; rather, **it is a binary classification** (do you have cancer: yes or no?).  Because of this, the approach to modeling we have covered thus far does not apply.
+
+You might (and should!) remember from your introductory statistics course that such a binary categorical variable is usually described, not with a **mean** parameter, but rather a **proportion** (or probability) $p$.  The appropriate kind of probability model in this case is a **binomial distribution**.
+
+### Review of the binomial distribution
+
+What gives rise to the binomial distribution?  Consider the following:
+
+* We have a population that, as far as we are concerned consists of only two types of outcomes, which we generically refer to as **successes** and **failures**.  The success outcome is the outcome of research interest (even if it doesn't seem 'right' to call it a success, such as a patient has cancer!)
+* We randomly sample $n$ individuals from the population.  If sampling randomly, this ensures the observations are independent.
+* The statistic of interest is $Y$ = the number of successes in the sample.
+
+If these conditions are satisfied, then $Y$ is said to be binomially distributed with parameters $n$ and $p$. The parameter $p$ is actually the probability of a success, or $p=P(success)$, on any one sampled trial.  The form of the probability distribution is given by:
+
+$$P(Y=y)= \frac{n!}{y!(n-y)!}  p^y(1-p)^{(n-y)}$$ 
+for $y=0,1,2,.,n$.
+
+In shorthand, we denote this by writing $Y \sim Bin(n, p)$. The expected value (i.e. mean) of a binomial variable is $np$, and the standard deviation of a binomial variable is $\sigma = \sqrt{np(1-p)}$.
+
+**The key ingredient we are interested in as researchers is $p$, the true probability of success.**  Why is this important?  Because it serves as a summary description of the outcome (response) in cases where the response variable is binary (Note: the mean was the summary description for response variables that are continuous).
+
+Consider the following:
+
+* **Binomial scenario: Random guessing.**  Suppose you are to take a quiz that has ten multiple-choice questions, where each question has 4 possible responses (of which only one is correct).  You fail to study for the test, so you just randomly guess on every question.  What is the chance you get exactly two of the questions right?  If 60% is the minimum passing grade, what is the chance you fail the test?
+
+    + QUESTION: What is $p$ in this scenario?  
+    
+-------------------------------------------------------
+    
+ 
+    
+* **Binomial scenario: Cancer prevalence.**  It is of interest to see if the prevalence of lung cancer among 60-year old men is affected by how long they have been a smoker.  Each man in the population (or the sample) either has lung cancer or does not --- so a binary outcome.  Prevalence would be calculated by the estimating the proportion of men who have lung cancer with specific smoking histories (e.g. been a smoker for at least 10 years).
+
+    + QUESTION: What is $p$ in this scenario?   
+    
+-----------------------------------------------------
+
+In real world applications, $p$ is unknown, and we are trying to estimate it.  This can be easily done once a sample is collected from the population under study.  An unbiased estimate of $p$ is $$\hat{p} = \frac{\#~successes}{n}$$
+
+This seems pretty simple. For example, in the above examples suppose:
+
+* you guessed on the multiple-choice quiz and got only two questions correct.  What is $\hat{p}$ based on your sample of 10 guesses?   
+ 
+* The below R code includes the necessary calculate to check the cancer prevalence among the sampled 60-year old men with a 10+ year history of smoking.  What is $\hat{p}$?  
+
+```{r}
+heavysmokers <-
+ dplyr::filter(cancerprev, yrssmoke >= 10)
+ xtabs(~cancer, data=heavysmokers)
+```
+
+-----------------------------------------------------
+
+### Computing Odds 
+
+Another way of communicating this kind of summary information is in the form of **odds of success** (i.e. the odds of an event of interest occurring).  The odds of an event is defined as the probability that the event happens divided by the probability it doesn't happen, or 
+
+$$Odds = \frac{P(success)}{P(not~success)}$$
+This can be estimated using the following:
+
+$$Estimated~odds = \frac{ \frac{\#~successes}{n}  }{  \frac{\#~failures}{n} } = \frac{\#~successes}{\#~failures}$$
+
+**Cancer prevalence.**  What are the estimated odds of lung cancer in a 60-year old male who has smoked at least 10 years?   
+
+Note that while probabilities can only range between 0 and 1, **odds can be anything from 0 to $\infty$.**
+
+--------------------------------------------------------------
+
+### "I thought this was a regression course!"
+
+It is, don't worry!  So how does all the above discussion link to regression modeling?  Well, suppose that **the probability (or odds) of some event occurring is affected/related to other predictor variables.**  For instance, 
+
+* the probability of a 60-year old man having lung cancer might be related to how long they have been a smoker
+* the probability that you guess your instructor's age correctly to within 3 years might be related to whether or not your gender, or your favorite time of day
+
+In such cases, we are (implicitly) building regression models, but the outcome is binary.  The characteristic we will be modeling is the odds of the success outcome occurring.
+
+**We will delve deeper into this concept on an upcoming in-class assignment!**
+
+----
+
+### Another illustration
+
+The dataset `YouthRisk2007.csv` is derived from the 2007 Youth Risk Behavior Surveillance System (YRBSS), which
+is an annual survey conducted by the Centers for Disease Control and Prevention (CDC) to monitor the prevalence of health-risk youth behaviors. This datset focuses on whether or not youths have recently (in past 30 days) ridden with a drunk driver.  The article *"Which Young People Accept a Lift From a Drunk or Drugged Driver?"* in Accident
+Analysis and Prevention (July 2009. pp. 703-9) provides more details.
+
+The variables are:
+
+* `ride.alc.driver`: Did the youth ride with a drinking driver in past 30 days?
+* `female`: Is the youth a female?
+* `grade`: Year in high school (9, 10, 11, or 12)
+* `age`: Age (in years)
+* `smoke`: Did the youth ever smoke?
+* `driver.license`: Does the youth have a driver’s license?
+
+```{r}
+riskdata <- read.csv("YouthRisk2007.csv")
+
+riskdata <- riskdata %>%
+  mutate(grade = factor(grade)) %>%
+  drop_na()
+
+glimpse(riskdata)
+```
+
+First, let's compare sophomores to seniors: 
+
+```{r}
+xtabs(~ grade + ride.alc.driver, data=riskdata)
+```
+
+**QUESTIONS we go through together**:
+
+1. What are the odds that a sophomore recently rode with a drunk driver?   
+```{r}
+944/2114
+```
+*Sophomores are 44.7% as likey to have ridden with a drunk driver as to have not.*
+
+2. What are the odds that a senior recently rode with a drunk driver?    
+```{r}
+1059/2070
+```
+*Seniors are 51.2% as likey to have ridden with a drunk driver as to have not.*
+
+
+3. You can also consider freshmen and juniors in this assessment. Does it appear that this characteristic (grade) is related to this risky behavior?   
+```{r}
+885/2070
+961/2172
+```
+
+# In-class Assignment
+
+Using the dataset `YouthRisk2007.csv`,  *ANSWER THE FOLLOWING* with justification based on the output:
+
+----
+```{r}
+xtabs(~ smoke + ride.alc.driver, data=riskdata)
+```
+
+**Question 1**. What are the odds that a smoker recently rode with a drunk driver?  What about a non-smoker?
+
+```{r}
+2797/3781
+1052/4652
+
+```
+
+*A smoke is 22.6% likey to drive with a drunk driver rather than not. A non smoker is 73.9% likey to drive with a smoker than not.*
+
+----
+
+**Question 2**. What are the odds that a male recently rode with a drunk driver?  What about a female?
+
+```{r}
+xtabs(~ female + ride.alc.driver, data=riskdata)
+1196/4626
+2635/3807
+```
+
+*A male is 25.9% likey to ride with a drunk driver than not, a female is 69.2% likey to drive with a drunk driver than not.*
+
+----
+
+**Question 3**. Between smoking and gender, which one of these two variables seems like it has a larger effect on this risky behavior of riding with a drunk driver?
+
+*It seems like smokers have a riskier effect on behavior of riding with a drunk driver.*
+
+----
+
+
+**Question 4**. Now let's look at the opposite direction from question 1. What are the odds that a person is a smoker given that they recently rode with a drunk driver? What about the odds that a person is a smoker given that they recently did not ride with a drunk driver?
+```{r}
+xtabs(~ ride.alc.driver + smoke, data=riskdata)
+2797/1052
+```
+*A person is 265.8% likely to be a smoker given that they rode with a drunk driver.*
+
+----
+
+
+**Question 5**. Are the odds of riding with a drunk driver given that a person is a smoker the same as the odds of being a smoker given a person has ridden with a drunk driver?
+
+*No they are not*
+
+----
+
+
+**Question 6**. Suppose we fix the number of smokers and non-smokers we sample in such a study and get information from the same number of smokers and non-smokers (e.g. 100 smokers and 100 non-smokers). Would it make sense to estimate the odds computed in Question 4 under these circumstances? Why or why not?
+
+*Yes, when you flip the odds around you get different numbers even if the smokers and non-smokers are fixed.*
+
+----
+
+
+

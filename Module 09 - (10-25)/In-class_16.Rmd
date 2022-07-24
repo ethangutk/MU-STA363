@@ -1,0 +1,449 @@
+---
+title: "Class 16: Dealing with Issues in Multiple Regression"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+library(GGally)
+library(ggfortify)
+library(gridExtra)
+library(lindia)
+```
+
+# Back to checking assumptions!
+
+In STA 363, we have been repeatedly reminding you of the underlying assumptions of the statistical models that we have been fitting, both for designed experiments and multiple regression models using observational data.  We have also been feeding you, bit by bit, some remedial steps that you can take to address violations of assumptions.  These are covered in great length and detail in Chapter 8 in the textbook.  
+
+So, it is not our intention here to go over how to check these things in an introductory manner, because we are past that. *The goal of this in-class presentation is to provide you with a case study to work with, to consider and attempt remedial steps in addressing assumption violations.*  
+
+It is important to keep in mind the following philosophy when addressing violations:
+
+1. Some assumptions are more critical that others.
+2. Assumptions are rarely ever *perfectly* satisfied.  Rather, it is more a case of *how bad is the violation*.  Keeping this in mind will help keep you from trying to "make everything perfect".
+
+**Order of consideration.**  There is a reasonable "pecking order" in terms of checking and addressing the assumptions. Here we list the assumptions in a multiple regression analysis in order of importance:
+
+1. **Independence:** The errors are independent (i.e. all observations are made independent of one another).
+2. **Linearity:** The structural part of the regression model is reasonably well specified.
+3. **Constant Variance:** The errors have homogeneous variance.
+4. **Normality:** The errors are normally distributed.
+
+and a new assumption we have not really discussed yet:
+
+5. **Unusual observations:**  Occasionally, a few observations may not fit the model well. These have the potential to dramatically alter the results, so we should check for them and investigate their validity.
+
+
+## Case Study: Navy Hospitals
+
+Data was collected from 17 U.S. Naval hospitals at various sites around the world. The government is interested in studying the relationship between monthly labor hours (`Manhours`) and average daily patient load, monthly x-ray exposures, eligible population in the area and average length of a patient's stay, in days.
+
+The following code chunk reads in the data to R. We also choose to remove the variable `Bed.Days` from the dataset:
+
+```{r}
+hospital <- read.table("navyHospitals.txt", header=TRUE)
+hospital <- hospital %>% select(-Bed.Days)
+head(hospital)
+```
+
+**DiSCUSSION 1.**  Think about the independence assumption in this context. In particular, can you think of any potential reasons why we might doubt the validity of independence of observations in this context?
+
+*ANSWER: There could be some location-based dependence between some observations.  If some hospitals are located near each other, they could draw from the same client pools and hence affect each other's degree of usage (affecting variables like patient load, etc.)*
+
+-------------------------
+
+To address the next assumptions, we need to visualize the data and also fit a model to it. Use R to:
+
+1. Generate a scatterplot matrix of all the variables (we have done this before)
+2. Fit the main effects linear regression model given by
+
+$$Manhours = \beta_0 + \beta_1(Patient.Load) + \beta_2(X.Rays) + \beta_3(Population) + \beta_4(Days) + \varepsilon$$
+
+```{r, fig.width=8.5, fig.height=8}
+ggpairs(hospital) + 
+  theme_bw()
+hospital.fit <- lm(Manhours ~ Patient.Load + X.Rays + Population + Days, data=hospital)
+```
+
+**DiSCUSSION 2.**  Assess any associations that appear to exist between the response variable '`Manhours` and the 4 predictors; and ALSO any associations that appear to exist solely among the 4 predictors themselves.
+
+*Manhours appears to be strongly related to patient load, x-rays and population. It stands to reason that patient load is also correlated to population and X-rays (more population to serve -> more patients; more patients -> more x-rays).*
+
+-------------------------
+
+The next few assumptions deal with checking the residuals from a fitted model. So first, generate the residual plots from your model:  
+
+```{r}
+autoplot(hospital.fit) + 
+  theme_bw()
+```
+
+**DiSCUSSION 3.**  Check the linearity assumption.  What *would* be remedial action to take in this case, if warranted?    
+
+*ANSWER: No obvious violations.  No curvature of note in the residuals vs fitted plot.*
+
+-------------------------
+
+**DiSCUSSION 4.**  Check the constant variance and normality assumptions.  *You should know that violations of one of these tends to go hand-in-hand with violations of the other.*  Take remedial action in the form of response variable transformation (Box-Cox) if you think it is necessary.  
+
+*ANSWER: There appears to be a variance issue (Scale-Location plot shows steady rise). We check for potential Box-Cox transformations.*
+
+```{r, fig.height=4.4, fig.width=5}
+gg_boxcox(hospital.fit) + 
+  theme_bw()
+```
+
+*No Box-Cox transformation is really warranted ($\lambda$ is approximately 1).*
+
+
+-------------------------
+
+**UNUSUAL OBSERVATIONS.**  What we call 'unusual observations' in a regression analysis can be defined in a couple of different ways:
+
+* **Outliers:** Isolated observations that are poorly predicted by the model that was fit (unusually large residual value)
+* **High Leverage Points:** Observations that individually exert large influence on the resulting fitted model
+
+We can check for these characteristics by using the lower right plot from `autoplot()`.  This displays each observation's **standardized residual** vs. its **leverage** value.  
+
+* For outlyingness, we can employ an Empirical Rule-type argument to determine what might constitute being a potential outlier ($|standardized\ residual| > 3$).  
+* For leverage, we can compare a point's leverage value against $2p/n$, where $p$ = the number of predictor variables in the model. But, visual checks are often enough to really identify suspected points.
+   + It is worth noting that a point with high leverage is not necessarily a problem on its own. But, it could lead to to an inflation or deflation of regression coefficients as it exerts large influence on the model.
+* There is also a more general measure of influence called **Cook's D** (*Cook's Distance*) which we will cover more in the next class meeting.
+
+**QUESTION 5.**  Check the residual plots for unusual observations, and identify any suspect points by observation number.
+
+```{r}
+# Check for leverage threshold:
+2*4/17
+```
+
+*ANSWER: No outliers, but we do have a few high-leverage points (higher than the threshold of 0.47).*
+
+----------------------------------
+
+**Remedial action possibilities for unusual observations**
+
+1. Check the validity of the data value.  It could just be a typographical error during data entry!
+2. Investigate the origin of the data point.  It might be correctly recorded, but be from a different population than the one under study. If so, removal of it is warranted from the data.
+3. *You should not remove a point just because it is an outlier.*  If you are convinced that there is no coding error and the point is valid, then its unusual value may be the result of some underlying variable which you have not accounted for in your model. In a case like this, options include:
+    * Fit your model *twice*: once to the entire data set, and again with the suspected outlier removed.  See the impact of its removal on the analysis.  If there is a noticeable difference in fit, then you probably shouldn't just drop it.
+    * Keeping the point, but adding a dummy variable into the model that simply indicates this point or not.  Then, its unusual individual behavior will be accounted for in your model.
+
+Here I show you these two options.  Suppose we suspect that observation #14 is an outlier.  
+
+**Here is the first approach:**
+
+```{r}
+# Fit main effects model to the full data:
+hospital.fit1 <- lm(Manhours ~ Patient.Load + X.Rays + Population + Days, data=hospital)
+summary(hospital.fit1)
+
+# Fit main effects model to the data with observation #14 removed:
+# We remove it using the filter() function
+hospital.fit2 <- lm(Manhours ~ Patient.Load + X.Rays + Population + Days, data=filter(hospital, row_number() != 14) )
+summary(hospital.fit2)
+```
+
+The model's $\beta$-coefficient estimates changed considerably when removing the "outlier", and the residual standard error dropped from 622.1 to 391.2!  If this is a valid data point, then it shouldn't be removed because the act of removing it changes the quality of the model considerably.
+
+**The second approach** would be to create a dummy varibale to uniquely identify this individual hospital, and build its unique effect into the model.  I do this below, creating a dummy variable named `Hospital14` using `mutate()`:
+
+```{r}
+hospital <- hospital %>% 
+  mutate(Hospital14 = (row_number()==14))
+hospital       # look at the resulting dataset
+```
+
+Now fit the model with the new dummy variable `Hospital14`:
+
+```{r}
+hospital.fit3 <- lm(Manhours ~ Patient.Load + X.Rays + Population + Days + Hospital14, data=hospital)
+summary(hospital.fit3)
+```
+
+Now we compare the performance of these three models:
+
+$$\begin{array}{ccc}
+\hline
+\ & \textbf{Full data} & \textbf{Outlier removed} & \textbf{Full data w/dummy var} \\
+\hline
+{R^2_{adj}}\ & 0.9875 & 0.9951 & 0.9950 \\
+Residual SE\ & 622.1 & 391.2 & 391.2 \\
+\hline
+\end{array}$$
+
+We can also see that all the model $\beta$-coefficient estimates **are the same** between Model 2 (Hospital 14 removed) and Model 3 (all hospitals included, but a dummy variable added to the model to distinguish Hospital 14 from the others) for all predictors they have in common!
+
+**QUESTION**.  Provide an interpretation of the $\beta$-coefficient estimate for `Hospital14TRUE`.
+
+*ANSWER: Regardless of any other hospital-specific predictor being considered, we estimate an aggregate increase of 1870 manhours for this specific hospital.*
+
+-------------------------
+
+### Multicollinearity and ways to deal with it
+
+Multicollinearity (MC) is a condition when there are interrelationships (correlations) of substantial strength **among the predictor variables** in a regression.  This creates problems in interpreting the impact or significance of individual predictors on the response variable.  Since this is obviously one of the main uses of regression analysis, it can be a serious issue impacting the usefulness of a model.
+
+Before we address some strategies, first note the following:
+
+* MC has *nothing* to do with the response variable $Y$ ... it is solely a predictor issue.
+* Serious MC impacts your ability to assess the contribution of individual predictors.  It does **not** affect "whole-model" assessments like the overall $F$-test, adjusted $R^2$, residual standard errors, or quality of prediction of the response.
+
+**Checking for MC.**  There are a few clues you can look for to see if you have a multicollinearity problem.  They are:
+
+1. **Seeing strong pairwise correlations between predictors in your EDA scatterplot matrix.**  It should be noted that MC can arise from more complex correlations than pairwise ones, so this check is not the best overall check for MC.
+2. **Model Weirdness.** If you see things like a significant whole model $F$-test result, but *none* of the individual model term tests are significant, you might have strong MC.  Another clue is $\beta$-coefficient estimates that are different in sign than what common sense or the EDA would predict. (Check out the coefficient estimate for `Population` ... does that make any sense??)
+3. **VIF**.  Variance Inflation Factors are the best check for MC.  There is a VIF for each predictor, and it is obtained by basically seeing how well you can predict a given predictor from the *other* predictors in the model.  $VIF > 10$ for a predictor is usually a red flag.
+
+**DISCUSSION 6.** Look at the scatterplot matrix, which predictor variables do you suspect will have strong MC in the Navy Hospitals problem?
+
+*ANSWER: Patient load, X-rays and population (as noted earlier).*
+
+---------------------------
+
+VIFs are available in R using the `car` package.  Here, I get them for Model 3 above:
+
+```{r, warning=F, message=F}
+library(car)
+vif(hospital.fit3)
+```
+
+`Patient.Load` and `Population` are highly colinear here. 
+
+**Strategies for dealing with MC.**  There are a few simple things you can try (and there are more sophisticated strategies too, but they are beyond the scope of this course).  They are:
+
+1. **Standardize all of your quantitative variables.** This can sometimes reduce the impact of MC. Basically, you re-express all the numeric variables in the model as *z-scores* by subtracting their mean and dividing by their standard deviation.
+    * This can be done in R using the `scale` function. **Do not standardized any categroical or dummy variables!**
+    * This does not always work, but it is worth a try.
+    * One nice by-product of standardizing your variables is that the relative impact of the predictors can now be compared directly between themselves, because standardizing removes the effect of different units of measurement on different predictors.
+2. **Remove a predictor (or predictors) that induce the MC.**  Pretty simple, but you should explore model options if doing this.
+
+Here we show you standardizing the variables using `mutate()` with the `across` option (*mutates* all specified variables with the `scale` function) to see the result on the regression.  We also recheck the VIFs:
+
+```{r}
+stdized.hospital <- hospital %>% 
+  mutate(across(c(Manhours,Patient.Load,X.Rays,Population,Days), scale) )
+head(stdized.hospital)
+
+hospital.fit4 <- lm(Manhours ~ Patient.Load + X.Rays + Population + Days + Hospital14, data=stdized.hospital)
+vif(hospital.fit4)
+```
+
+Wow, standardizing didn't help a bit!! OK, so we'll try some variable deletion instead.  
+
+Fit a regression model using all the predictors *except* `Population`.  Find the VIFs, and check adjusted $R^2$ and the residual standard error.
+
+```{r}
+hospital.fit5 <- lm(Manhours ~ Patient.Load + X.Rays + Days + Hospital14, data=hospital)
+vif(hospital.fit5)
+summary(hospital.fit5)
+```
+
+There is still some multicollinearity present due to `Patient.Load` ($VIF = 11.79$) and to some extent, `X.Rays`. While the adjusted $R^2$ is still very high, the residual standard error has suffered a bit from the previous models we fit (now $415.5$).  There may be improvements that can still be done.
+
+**Remember:** Multicollinearity is *only* a problem when you are trying to interpret the magnitude and/or significance of **individual predictors** on the response.  As you see in this example, removing predictors to try to break up multicollinearity can have a detrimental effect on whole model performance (e.g. less precise predictive power).
+
+
+## In-class Assignment
+
+# Data and premise
+
+For this assignment, we will dig into some models that are variants of those we have already worked with involving the county-level Coronavirus rates.  Today we are working with only counties in the state of Pennsylvania.
+
+The statistical goal for today is *get into the weeds* of the predictor variables. Much of, but not all, the code is supplied for this assignment.
+
+We begin with some data processing.
+
+```{r}
+county_data <- read.csv("usCountyCoronaVirusData_2020-11-07.csv")
+
+county_data <- county_data %>%
+  filter(State == "PA" ) %>%
+  mutate(Property_crime_rate = property_crime/pop*1000,
+         Violent_crime_rate = violent_crime/pop*1000,
+         Pop_density = pop/Area,
+         Corona_rate = Total_cases/pop*1000,
+         Corona_death_rate = Total_deaths/pop*1000) %>%
+  rowwise() %>%
+  mutate(AgHarvest = sum(c(Corn, Soy, Vegetables), na.rm=TRUE),
+         AgHarvest = ifelse(is.na(AgHarvest), 0, AgHarvest))
+```
+
+Let's take a moment and talk about the `rowwise()` and `mutate()` function at the end. 
+
+* First note, we separate those last few lines for readability and as a teaching moment, the `rowwise()` could be placed before or after the `filter()` statement and the mutations could be part of the other `mutate()` function.
+* In R, functions such as `sum()`, `mean()`, `sd()`, `median()` are designed to calculate the value across a vector, or column, of values. We've seen this before when we use one of these functions with a `group_by()` and `summarize()`. 
+* Here, I want to sum `Corn`, `Soy` and `Vegetables` within each county; that is, multiple variable across a row.
+   + I could use something like `Corn + Soy + Vegetables` but if any one of those terms is missing, the whole result would be `NA`.
+   + By using the `sum()` function, I can specify `na.rm=TRUE` and it will skip any missing terms.
+* I need to tell R to *sum* across multiple columns, or variables, **within each row**
+   + This is what the `rowwise()` function does.
+   + It tells R to compute the *sum* a row-at-a-time.
+* The last statement simply cleans up any counties where all the values are missing.
+   + That is, `sum(c(NA,NA,NA),na.rm=TRUE)` results in an `NA`.
+   + So we make the assumption that if a county reported no harvest, it didn't have any commercial harvest and...
+   + The `ifelse()` turns that missing value into a 0 for our analysis today.
+
+
+# Part 1
+
+We include a scatterplot of our prospective predictor variables for today. Note, we include `cache=TRUE` so this plot only needs to be generated once.
+
+```{r, fig.width=10, fig.height=10, message=FALSE, warning=FALSE, cache=TRUE, echo=FALSE}
+county_for_plot <- county_data %>%
+  mutate(Corona_rate = log10(Corona_rate+1),
+         Log_Pop_density = log10(Pop_density),
+         Log_Prop_crime = log10(Property_crime_rate+1),
+         Log_Vio_crime = log10(Violent_crime_rate+1),
+         Log_Ag_Harvest = log10(AgHarvest+1) ) %>%
+  select(age, income, PercCollege, per_dem, PercVets, Log_Pop_density, Unemployment_rate, HighMaskUsage, Log_Prop_crime, Log_Vio_crime, Log_Ag_Harvest)
+
+ggpairs(county_for_plot,
+        lower = list(continuous = wrap("points", alpha=0.65, size=0.95)),
+        upper = list(continuous = wrap("cor", color="black") ) ) +
+  theme_bw() +
+  theme(panel.grid.major = element_blank() )
+```
+
+## Question 1
+
+Based on the supplied scatterplot matrix of the predictor variables, do you have any concerns multicollinearity will be present in any multiple regression models we build today? Justify by referencing output in the plot.
+
+**Percent democrat and population densisty as well as percent veterns and age. Both of these correlations have above 0.8 with 0.86 and 0.811**
+
+
+
+
+
+
+----
+
+
+
+
+# Part 2
+
+This part is all about multicollinearity and previews some model selection ideas we will cover in the next module.
+
+## Question 2
+
+Five simple linear regression models are fit in the next code chunk:
+
+```{r}
+model01 <- lm((Corona_rate+1)^(1/3) ~ log10(Pop_density), data=county_data)
+summary(model01)
+model02 <- lm((Corona_rate+1)^(1/3) ~ per_dem, data=county_data)
+summary(model02)
+model03 <- lm((Corona_rate+1)^(1/3) ~ PercCollege, data=county_data)
+summary(model03)
+model04 <- lm((Corona_rate+1)^(1/3) ~ PercVets, data=county_data)
+summary(model04)
+model05 <- lm((Corona_rate+1)^(1/3) ~ Unemployment_rate, data=county_data)
+summary(model05)
+```
+
+You should note that four of the five predictor variables are significant predictors for the cubed root of the Coronavirus rate when fit marginally as simple linear regression models. Now consider the following multiple regression model:
+
+```{r}
+model_part2 <- lm((Corona_rate+1)^(1/3) ~ log10(Pop_density) + per_dem + PercCollege + PercVets +   Unemployment_rate, data=county_data)
+summary(model_part2)
+```
+
+What do you notice about the adjusted $R^2$ value of `model_part2` compared to those reported in the simple linear regressions supplied above? Do you find its lack of explanation strange compared to the accumulation of variability explained in the simple linear models? Discuss.
+
+**The fact that you can add so many variables and the R^2 value does not change is interesting to me. This must mean that the predictor variables are related in some way. Overlap in variability in models create the model given in part2.**
+
+
+
+
+
+## Question 3
+
+You should note that in the simple linear regression models, four of five predictors were significant when fit marginally, yet in `model_part2` only one shows up as significant. Why do you think that is the case?
+
+**When taking into account multiple variables that are correlated, it will rely on more variables but doesn't know which ones is creating the correlation.**
+
+
+
+
+
+
+## Question 4
+
+Calculate the Variance Inflation Factors in `model_part2`.  What do these values imply about the predictors in the model and relate it to the findings in Question 1, Question 2 and Question 3?
+
+You might want to consult the textbook as well as the notes for VIF values.
+
+```{r}
+vif(model_part2)
+```
+
+**None of the variance inflation factors here are above ten so it does not give us a red flag.**
+
+
+
+## Question 5
+
+In the below code chunk, construct a new model for the cubed root of the Coronavirus rate plus 1 where you have removed the predictor variable with the most concerning variance inflation factor. What do you notice about the adjusted $R^2$ compared to the other models fit? Compute the VIF for the predictors of this model and discuss the findings of the marginal $t$-tests in this model.
+
+**Answer here**
+
+```{r}
+
+```
+
+**Answer here**
+
+ 
+
+
+
+## Question 6
+
+Fit a reduced version of the multiple regression model from question 5 where you have removed all insignificant predictors based on marginal $t$-tests, in addition to the variable with the most concerning VIF value removed in Question 5. Perform a reduced model $F$-test to statistically determine if your model in question 5 significantly improves over this new model.
+
+```{r}
+
+```
+
+**Answer here**
+
+
+
+## Question 7
+
+Does the result of question 6 surprise you when you look at the `summary()` output for the model fit in question 5? Discuss the implication of these results.
+
+**Answer here**
+
+
+
+
+## Question 8
+
+In question 6, you should have removed two variables, `PercCollege` and `PercVets`. We saw in question 7 that collectively the two variables were significant to predict coronavirus rates, but in part 5 they appeared to be insignificant marginally. In the code chunk below, consider adding one variable at a time to the reduced model from part question 6 (including the logarithm of population density and unemployment rate). 
+
+What do you notice about the findings? (hint: don't overthink it, use `lm()` and `summary()`)
+
+```{r}
+
+```
+
+**Answer here**
+
+
+
+
+## An Important Note!
+
+This assignment is designed to show you all the *crazy* things that can happen in regression, specifically when looking at the marginal $t$-tests. 
+Paying attention to the `PercVets`, `PercCollege` and `Unemployment_rate` variables, compare and contrast the $t$-test values and $p$-values for those variables in `model_part2` to that in question 5, question 7 and question 8. You should note that the $t$-test values, and corresponding $p$-values, can change quite a bit ($p$-values change by an orders of magnitude). 
+
+**This is because of multicollinearity!** Also note that the VIF values only seemed to identify a little bit of multicollinearity in this data. This is also not uncommon as the VIF values are based on linear relationships among the predictor variables (you will see the equations if you take STA 463). It is possible nonlinear relationships exist between the predictor variables which is not as easily detected and can make interpretation of marginal $t$-test challenging.
+
+And lastly, recall from the notes: **multicollinearity only affects inference regarding the predictor variables -- it has no impact on the model's ability to predict**.
+
+ 

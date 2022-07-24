@@ -1,0 +1,521 @@
+---
+title: "Class 20: Model Validation"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(GGally)
+library(leaps)
+library(car)
+library(tidymodels)
+library(knitr)
+```
+
+## Model validation
+
+The main concept of *model validation* is to evaluate the model you have built. In most applications, we measure models based on their predictive accuracy ... in other words, how well the model predicts the response variable of interest.
+
+Measures such as $R^2$ or $R_{adj}^2$ provide a measure of model prediction accuracy, however they are inherently biased because the **same** data is used to both build the model **and** assess the predictive accuracy. Surely a fitted model will optimize its predictive accuracy if the same data is used to fit the model and assess its accuracy!
+
+To handle this sort of situation, the simple solution is to get more data! 
+
+* Fit the model based on one set of data.
+* Assess its predictive accuracy using a different (new) set of observations.
+
+In practice, collecting more data is not always feasible. In such cases, we perform **model validation** studies.
+
+
+## Data example and preparation
+
+Before proceeding with the statistical details, let's first look at today's example: **Happiness**.
+
+In the file `happiness2016.csv` is the happiness index record for most countries in the world in 2016. Our goal for today is to try and predict a country's happiness based on other information about the country. 
+
+```{r warning=FALSE}
+happiness <- read.csv("happiness2016.csv") %>%
+  select(Country, Region, Happiness.Score)
+```
+
+Two variables we will consider are the gun ownership and homicide rates for that country. We used this data few modules ago:
+
+```{r warning=FALSE}
+guns <- read.csv("firearmsMurderOwnership.csv") %>%
+  rename(Country=Country.Territory, 
+         Homicides = Homicide.by.firearm.rate.per.100.000.pop,
+         Gunrate = Average.firearms.per.100.people) %>%
+  select(Country, Homicides, Gunrate)
+```
+
+We also considered the Inequality-adjusted Human Development Index values, from a different data set:
+
+```{r warning=FALSE}
+iahd <- read.csv("iahd-index.csv", skip=6, header=FALSE, na.strings="..") %>%
+  select(V2, V5 ) %>%
+  rename(Country=V2, IHDI=V5)
+```
+
+Lastly, we will consider the life expectancy, population and Gross Domestic Product (per capita) for each country as collected by *gapminder*  in 2007:
+
+```{r warning=FALSE}
+gap2007 <- read.csv("gapminder2007.csv") 
+```
+
+We merge all this data together using an `inner_join` statement, so only countries in all four data files are retained.
+
+```{r warning=FALSE}
+full.data <- happiness %>% 
+  inner_join(., guns, by="Country") %>%
+  inner_join(., iahd, by="Country") %>%
+  inner_join(., gap2007, by="Country") %>%
+  drop_na()
+head(full.data)  # check the top of the data set
+tail(full.data)  # check the bottom of the data set
+dim(full.data)   # find the dimensions (no of rows and columns) of the data set
+```
+
+You'll note in the above that we drop all observations that contain any missing values (`NA`). We do this for ease, but many of the methods we describe below would work if `NA` values were included.
+
+-----
+
+### EDA of data
+
+Our goal is to build a predictive model for a County's happiness.
+
+Let's visualize the numeric variables, specifying the happiness rating as last (it's in column 3):
+
+```{r, fig.height=8, fig.width=8}
+ggpairs(full.data, columns=c(4,5,6,7,8,9,3))
+```
+
+Several variables are clearly heavily skewed (population, homicide rates, GDP).  We can *fix* some of that skewness with a log transformation:
+
+```{r}
+logged.data <- full.data %>%
+  mutate(Homicides = log(Homicides+1),
+         Gunrate = log(Gunrate),
+         pop = log(pop),
+         gdpPercap = log(gdpPercap))
+```
+
+and note the `Homicides = log(Homicides+1)` to handle a few countries reporting zero homicides.
+
+Now graphically look at the numeric variables with transformations invoked:
+
+```{r, fig.height=8, fig.width=8}
+ggpairs(logged.data, columns=c(4,5,6,7,8,9,3))
+```
+
+### Some initial models
+
+Let's begin by fitting two models: a full model *and* a model based on backward selection.
+
+```{r}
+full.model <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + lifeExp + pop + gdpPercap, data=logged.data)
+backward.step.model <- stats::step(full.model, direction="backward", trace=FALSE)
+
+summary(full.model)
+summary(backward.step.model)
+```
+
+The model with all the numeric predictor variables has a $R^2_{adj}$ of 0.6189 while the backward stepwise selected model has an $R^2_{adj}$ of 0.621, a very slight improvement. Overall, the backward selection model appears to be a better fit for predicting a countries happiness. We have excluded the results here, but forward selection picks the same model as backward selection.
+
+We also consider a subsets regression approach.
+
+```{r}
+fit.subsets <- regsubsets(formula(full.model), data=logged.data, nbest=1, nvmax=6)
+subsets(fit.subsets, statistic="adjr2", legend=FALSE)
+```
+
+We have excluded the plot comparing BIC as it picks the same model as the backward selection. Here, it appears a model including Homicides, Gun rate, IHDI and the GDP per Capita results in the best $R^2_{adj}$.
+
+```{r}
+fit.sub4 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=logged.data)
+```
+
+And we can compare the three fitted models
+
+```{r, echo=FALSE}
+bind_rows(
+  glance(full.model) %>% mutate(Model="Full"),
+  glance(backward.step.model) %>% mutate(Model="Step-wise: Homicide + GDP"),
+  glance(fit.sub4) %>% mutate(Model="Subsets: Homicide+Gunrate+IHDI+GDP") ) %>%
+  select(Model, Adj.R.Squared = adj.r.squared,
+         AIC, BIC) %>%
+  kable()
+```
+
+
+
+----
+
+## Validation sets
+
+Obtaining extra data is often impossible, so one idea is to separate your data into two components: one for model building (typically called the **training** set) and the other a leave-out set for model validation (typically called the **testing** or validation set). 
+
+There are countless ways to do this in R, but one simple way is to use functionality in the `tidymodels` package.
+
+```{r, message=FALSE, warning=FALSE}
+library(tidymodels)
+```
+
+As a first step, we randomly separate our data into two parts, a training and testing set. A standard method of doing this is an 80-20 rule (80\% for training, 20\% for testing) but other options are just as valid (90-10, 75-25, etc...).
+
+**DISCUSSION:** Why random assignment?
+*Depending on how the data set is ordered, it can create a bias when splitting the data. The data could be split with the happiness index being high and the happiness index being low.*
+
+```{r}
+set.seed(363)
+
+data.split <- initial_split(logged.data, prop=0.8)
+data.split
+
+train.data <- training(data.split)
+test.data <- testing(data.split)
+
+glimpse(train.data)
+glimpse(test.data)
+```
+
+We now have two datasets, one called `train.data` for which we will use to build models, the other `test.data` that is used for validation. You'll note we use `set.seed()` so the same *random* set is always picked for the purpose of this demonstration (this ensures reproducibility). We use the function `initial_split` and specify `p=0.8` so the training set is approximately 80\% of the original data.
+
+#### Main idea
+
+The key ideas is to fit the model using the *training* set and use that model to predict the response variable in the *testing* set. We can then assess the models predictive accuracy.
+
+#### An aside about the code
+
+There are algorithms and functions that will perform many of the tasks we cover today (and in the next lesson). Some of this code is long-winded for the sake of explaining and learning. There are more streamlined approaches.
+
+### Fit models with training
+
+We will fit the three models we considered before, but using the *training* dataset
+
+```{r}
+train.fit.full <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + lifeExp + pop + gdpPercap, data=train.data)
+train.fit.back <- lm(Happiness.Score ~ Homicides + gdpPercap, data=train.data)
+train.fit.sub4 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=train.data)
+```
+
+We will use each of these models to predict the values in the testing dataset. We could use the `predict` function to do this. Below, we add predictions to the `test.data` using the `add_predictions` function from the `modelr` package.
+
+```{r, message=FALSE, warning=FALSE}
+library(modelr)
+test.data <- test.data %>%
+  add_predictions(train.fit.full, var="Full.pred") %>%
+  add_predictions(train.fit.back, var="Back.pred") %>%
+  add_predictions(train.fit.sub4, var="Subs.pred")
+
+glimpse(test.data)
+```
+
+Now we can compare the true values to the predicted values. There are a few different ways we can aggregate the results; the two most common are the square root of the mean squared error, typically denoted **RMSE**, or the mean absolute error, **MAE**:
+$$RMSE = \sqrt{\frac{1}{n}\sum_{i=1}^n (Y_i - \hat{Y}_i)^2}, ~~~~~~~MAE =  \frac{1}{n}\sum_{i=1}^{n} |Y_i - \hat{Y}_i|$$
+Let's calculate both explicitly
+
+```{r}
+test.data %>%
+  summarize(Full.RMSE = sqrt(mean((Happiness.Score-Full.pred)^2)),
+            Back.RMSE = sqrt(mean((Happiness.Score-Back.pred)^2)),
+            Subs.RMSE = sqrt(mean((Happiness.Score-Subs.pred)^2)),
+            Full.MAE = mean(abs(Happiness.Score-Full.pred)),
+            Back.MAE = mean(abs(Happiness.Score-Back.pred)),
+            Subs.MAE = mean(abs(Happiness.Score-Subs.pred)) ) %>%
+  kable()
+```
+
+The model from backward stepwise regression has the lowest RMSE and MAE (less error is good). Also, you'll note it is the simplest model (only 2 predictor variables). This is not uncommon, generally speaking, simpler models tend to predict better.
+
+#### Streamlined version of the above
+
+The above code is a bit long-winded to help show how all the steps and calculations required. Below is code that streamlines the calculation of the RMSE and MAE using the `rmse` and `mae` functions in the `modelr` package.
+
+```{r}
+set.seed(363)
+
+data.split <- initial_split(logged.data, prop=0.8)
+train.data <- training(data.split)
+test.data <- testing(data.split)
+
+train.fit.full <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + lifeExp + pop + gdpPercap, data=train.data)
+train.fit.back <- lm(Happiness.Score ~ Homicides + gdpPercap, data=train.data)
+train.fit.sub4 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=train.data)
+
+modelr::rmse(train.fit.full, test.data)
+modelr::rmse(train.fit.back, test.data)
+modelr::rmse(train.fit.sub4, test.data)
+
+modelr::mae(train.fit.full, test.data)
+modelr::mae(train.fit.back, test.data)
+modelr::mae(train.fit.sub4, test.data)
+```
+
+Based on this single validation study, it appears the backward stepwise model is best at predicting the happiness scores of countries.
+
+#### Limitations of this approach and coding
+
+There are several limitations and items to note about what has been presented today.
+
+* For one, the results are limited to this particular training/testing set. A different random split may result in a different result. That is, a different model could be best.
+* In this example, MAE and RMSE suggested the same model, but this is not always the case.
+   + RMSE penalizes more for really poor predictions (bigger errors).
+   + MAE values tend to be stable for different sample sizes (whereas the RMSE will generally increase if the testing set is larger).
+* If the response variable is transformed (suppose we took a log or square root), the best model for the transformed response will not necessarily be the best model for the original data.
+* The single validation study is the elementary foundation of modern data science. More complicated approaches are done in practice (and covered in the next class).
+* The code presented here is just one way to perform the validation study, there are several others available. 
+
+## $k$-fold Cross-Validation
+
+The single validation study in the previous class lays the foundation for all validation studies, but it still suffers from a potential drawback. In particular,
+
+* Only 80\% of the observed data is ever used for model building, and it is never validated;
+* 20\% of the data is not used for building, but *only* for validating.
+
+Ideally, we would like to utilize **all** the data for both model building *and* validation (more *efficient* use of our data). 
+
+We can do this by repeating the validation process some number, say $k$, times.  This is known as **$k$-fold cross-validation**. Essentially, it goes like this:
+
+* Randomly segment your data into $k$ groups, each of size $n/k$. For discussion, call the groups "group 1", "group 2", $\ldots$, "group $k$".
+* Set aside group 1, and use the combined data in groups 2, 3, $\ldots$, $k$ to build a model, and then validate the model against group 1 (essentially what we did in the previous lecture).
+* Repeat the process where each time you set aside group $i$, and use groups 1, 2, $\ldots$,  $i-1$, $i+1$, $\ldots$, $k$ to build a model, and validate it against group $i$.
+* Aggregate all $k$ error rates into a single overall error rate.
+
+To demonstrate, let's consider the following (long-winded) code that performs a 5-fold cross validation study for the backward stepwise model.
+
+```{r}
+set.seed(363)
+data.folds <- vfold_cv(logged.data, v=5)
+data.folds
+```
+
+The object `data.folds` consist of a list of splits. Let's iteratively go through the process.
+
+```{r}
+data.train1 <- training(data.folds$splits[[1]])
+data.test1 <- testing(data.folds$splits[[1]])
+data.test1$Country
+
+fit.back.fold1 <- lm(Happiness.Score ~ Homicides + gdpPercap, data=data.train1)
+modelr::rmse(fit.back.fold1, data.test1)
+```
+
+We then repeat that process for all 5-folds
+
+```{r}
+data.train2 <- training(data.folds$splits[[2]])
+data.test2 <- testing(data.folds$splits[[2]])
+data.test2$Country
+
+fit.back.fold2 <- lm(Happiness.Score ~ Homicides + gdpPercap, data=data.train2)
+
+data.train3 <- training(data.folds$splits[[3]])
+data.test3 <- testing(data.folds$splits[[3]])
+
+fit.back.fold3 <- lm(Happiness.Score ~ Homicides + gdpPercap, data=data.train3)
+
+data.train4 <- training(data.folds$splits[[4]])
+data.test4 <- testing(data.folds$splits[[4]])
+
+fit.back.fold4 <- lm(Happiness.Score ~ Homicides + gdpPercap, data=data.train4)
+
+data.train5 <- training(data.folds$splits[[5]])
+data.test5 <- testing(data.folds$splits[[5]])
+
+fit.back.fold5 <- lm(Happiness.Score ~ Homicides + gdpPercap, data=data.train5)
+```
+
+The collection of RMSE values can be informative
+
+```{r}
+fit.back.rmse <- c(modelr::rmse(fit.back.fold1, data.test1),
+                   modelr::rmse(fit.back.fold2, data.test2),
+                   modelr::rmse(fit.back.fold3, data.test3),
+                   modelr::rmse(fit.back.fold4, data.test4),
+                   modelr::rmse(fit.back.fold5, data.test5) )
+summary(fit.back.rmse)
+```
+
+So, on average, the RMSE is `r mean(fit.back.rmse)`. But, we also have an estimate for the variability in the performance! We can use the variance/standard deviation within the collection of RMSE values to determine if the model consistently has that performance, or if it can be quite variable. 
+
+As an example, suppose we compare the backward selection model to the "full" model
+
+```{r}
+fit.sub4.fold1 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=data.train1)
+fit.sub4.fold2 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=data.train2)
+fit.sub4.fold3 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=data.train3)
+fit.sub4.fold4 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=data.train4)
+fit.sub4.fold5 <- lm(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=data.train5)
+
+fit.sub4.rmse <- c(modelr::rmse(fit.sub4.fold1, data.test1),
+                   modelr::rmse(fit.sub4.fold2, data.test2),
+                   modelr::rmse(fit.sub4.fold3, data.test3),
+                   modelr::rmse(fit.sub4.fold4, data.test4),
+                   modelr::rmse(fit.sub4.fold5, data.test5) )
+```
+
+Now compare the average RMSE values
+
+```{r}
+mean(fit.sub4.rmse)
+mean(fit.back.rmse)
+```
+
+On average, the model with only 2 predictors has a slightly better error rate.
+
+```{r}
+sd(fit.sub4.rmse)
+sd(fit.back.rmse)
+```
+
+But just as importantly, the model with only 2 predictors appears to consistently be better.
+
+-----
+
+### Streamlined Code
+
+You should note that this process is *very* repetitive, which the computer can do efficiently! In general, you should never do what we did above, we only did it for the sake of learning.
+
+In the `caret` package, the functions `trainControl` and `train` will perform the above in a simplified form. In the below example, we perform a 10-fold cross-validation study on the two models model
+
+```{r, message=FALSE, warning=FALSE}
+library(caret)
+train_control <- trainControl(method="cv", number=10)
+
+set.seed(363)
+model.back <- train(Happiness.Score ~ Homicides + gdpPercap, data=logged.data, 
+                    trControl=train_control, method="lm")
+
+set.seed(363)
+model.sub4 <- train(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=logged.data, 
+                    trControl=train_control, method="lm")
+
+## Now we can compare
+print(model.back)
+print(model.sub4)
+```
+
+A Recap and some findings:
+
+* 10-fold essentially separates the data into 10 parts, with 10\% of the data in each
+   + At each step, 90\% is used for training and 10\% for testing at each of the 10-folds
+* 90\% of 67 is 60.3, thus the *sample sizes* within each fold is around 60 or 61.
+* An aggregated RMSE of `r model.back$results[2]` is reported for the model with 2 predictors, which is slightly better than `r model.sub4$results[2]` for the model with 4 predictors.
+* However, in terms of the MAE - Mean Absolute Error, the model with 2-predictors has an aggregated error of `r model.back$results[4]` while the model with 4-predictors is slightly better at `r model.sub4$results[4]`.
+* The `Rsquared` reported here is a measure of the agreement between the predicted values and the true values (think fitting a simple linear regression, $x$=predicted values, $y$=true values, and calculate $R^2$).
+
+----
+
+## Leave-Out-One Cross Validation (LOOCV)
+
+A special case of cross-validation is **leave-out-one cross validation**. Here, we essentially set $k=n$, so we use all but one (i.e. $n-1$) of the observations to build a model and then use that model to predict the single "hold-out" observation. You repeat this process $n$ times, each time leaving one observation out. We can do this easily using `trainControl` and `train`:
+
+```{r}
+train_control <- trainControl(method="LOOCV")
+
+model.back.loocv <- train(Happiness.Score ~ Homicides + gdpPercap, data=logged.data, 
+                          trControl=train_control, method="lm")
+model.sub4.loocv <- train(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=logged.data,
+                          trControl=train_control, method="lm")
+
+print(model.back.loocv)
+print(model.sub4.loocv)
+```
+
+Here we see similar performance to the other studies. RMSE suggest the model with 2-predictors while MAE suggests the model with 4-predictors. 
+
+
+### An aside -- the PRESS statistic
+
+The squared prediction error associated in a LOOCV for a linear model has a special name, the **predicted residual error sum of squares**, or **PRESS** statistic:
+$$PRESS = \sum_{i=1}^n (Y_i - \hat{Y}_i)^2$$
+
+In general a LOOCV can be computationally burdensome (need to fit a model $n$-times), but some mathematics outside the realm of this course allow PRESS to be calculated with some matrix operations. The PRESS statistic can be calculated in R quite easily and is included in some add-on packages, which we exclude here as we are using `caret`.
+
+### Comparing LOOCV and $k$-fold CV
+
+**Properties of LOOCV**
+
+* LOOCV is nearly an unbiased estimate of the models predicative ability.
+   + LOOCV are not susceptible to randomness - no random selection or segmentation. 
+* LOOCV RMSE and MAE values tend to be more variable than those from $k$-fold CV study.
+   + A single poor prediction or two can stand out.
+* LOOCV can be computationally expensive when not fitting linear models.
+
+**Properties of $k$-fold Cross Validation**
+
+* $k$-fold CV studies have some inherit bias.
+   + any given result depends on random allocation.
+* $k$-fold CV tend to be less variable than LOOCV.
+   + A single poor prediction can get washed away in the aggregate of the fold.
+* $k$-fold cross validation is typically is computationally more efficient.
+
+----
+
+## Bringing it all together...
+## Repeated Cross-Validation
+
+In an effort to minimize the bias a single training-testing validation study, or even a $k$-fold study, while also balancing considerations to variability, it most statistical learning applications we use repeated cross-validation.
+
+Basically, the idea is to build a $k$-fold study but repeat that process many times, with different random segmentations. By repeating it the process multiple times, you mitigate any impact a particular random sample may have on performance (similar to the ideas of replication in design of experiments).
+
+This can be done easily in the `caret` package.
+
+```{r}
+train_control <- trainControl(method="repeatedcv", number=5, repeats=10)
+
+set.seed(363)
+model.back.rep_cv <- train(Happiness.Score ~ Homicides + gdpPercap, data=logged.data, 
+                           trControl=train_control, method="lm")
+
+set.seed(363)
+model.sub4.rep_cv <- train(Happiness.Score ~ Homicides + Gunrate + IHDI + gdpPercap, data=logged.data, 
+                           trControl=train_control, method="lm")
+
+results <- resamples(list(Mod1=model.back.rep_cv, Mod2=model.sub4.rep_cv))
+```
+
+We perform a repeated 5-fold cross-validation study on two models, one being the 2-predictor model (`Mod1`) from backward selection and the other a 4-predictor model (we call `Mod2`). The `resamples` function in `caret` links the results of the repeated cross-validation studies, so I can more easily compare the two models.
+
+```{r}
+print(results)
+summary(results)
+```
+
+The `summary` output from the `resamples` function (where the CV-studies are linked for comparison) provides the 5-number summary of the $5\times 10=50$ RMSE and MAE values (one for each of the 5-folds, repeated 10-times).
+
+Alternatively, we can plot a comparison (here we have mean errors with error bars). 
+
+```{r}
+ggplot(results, metric="RMSE")
+```
+
+and for the MAE
+
+```{r}
+ggplot(results, metric="MAE")
+```
+
+Alternatively, a comparison with boxplots (essentially the same as the numbers above) can be used. The `bwplot()` function is in the `lattice` package and works differently than `ggplot`, so we cannot tweak the plot using our normal syntax.
+
+```{r}
+bwplot(results, metric=c("RMSE", "MAE"))
+```
+
+We observe the following:
+
+* The RMSE for Model 1 overall appears to be smaller than Model 2 (less error!), but...
+* The MAE for Model 2 appears smaller than Model 1.
+   + For some folds/countries, Model 2 must have some pretty poor performance.
+* Given, the performance of MAE is close to equivalent (slight edge to Model 2), but Model 1 clearly has the superior RMSE, on average, we'll choose that model.
+
+Note that Model 1 is our model with only 2 predictor variables. 
+This sort of result is fairly typical in statistical practice. 
+More complicated models that tend to *fit* the training data (i.e., that data used to build the model) well do **not** predict that well, whereas simpler models that predict well do **not** always coincide with fitting the training data well. 
+
+**In general, simpler models tend to have smaller prediction errors.**  (Our Model 1 only has two predictor variables whereas Model 2 has four predictor variables.)
+
+
+
+

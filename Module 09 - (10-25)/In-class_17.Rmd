@@ -1,0 +1,463 @@
+---
+title: "Class 17: Leverage and Influence"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(tidyverse)
+library(ggfortify)
+library(gridExtra)
+library(GGally)
+library(knitr)
+```
+
+## Data
+
+We have two files of interest. The file `firearmsMurderOwnship.csv` contains data from a 2007 United Nations study where they collected data on the homicide rate (per 100,000 people) and average firearm ownership per household of a particular country. The file `iahd-index.csv` contains the Inequality-adjusted Human Development Index (HDI) values for countries around the world. HDI is a measure of the *development* of a country measuring values such as life expectancies, education levels, standards of living (per capita income, cost of living, etc...); higher values indicates a more *developed* country. This particular measure was collected circa 2010.
+
+Today we will explore these data as they provide an interesting study of leverage, influence and potential alternatives to regular linear regression.
+
+Specifically, we will consider the homicide rate as the response variable ($Y$) with gun ownership as the predictor variable ($X$) for countries with an IHDI value greater than 0.75. This corresponds to the 32 most *developed* countries in the world at the time the data was collected. 
+
+**Note**: No politics today, either international or national. Just a dataset that provides an interesting case study. 
+
+### Get the Gun Data
+
+First we need to get the two datasets and merge them by country. 
+
+```{r}
+guns <- read.csv("firearmsMurderOwnership.csv")
+
+## Data includes very long variable names
+## We rename when selecting them
+guns <- guns %>% 
+  select(Country=Country.Territory,
+         Homicides=Homicide.by.firearm.rate.per.100.000.pop,
+         Ownership=Average.firearms.per.100.people)
+
+ 
+
+iahdi <- read.csv("iahd-index.csv", skip=5, na.strings="..")
+
+## Dataset does not include variable names
+## By default R calls them X, X.1, X.2
+iahdi <- iahdi %>% 
+  select(Country=X.1, IHDI=X.4)
+
+full.guns <- inner_join(guns, iahdi, by="Country")
+```
+
+A note about `inner_join`: If you have taken a course that involves SQL then you already know! If you have not, `inner_join` essentially says to merge the dataset `guns` with `iahdi` using `Country` as the common key but only do so when the corresponding `Country` is in both datasets (essentially the intersection). So the IHDI value for Uzbekistan will be linked with the homicide rate and gun ownership rates of Uzbekistan. Only countries with values in both datasets will be linked (hence the *inner* part of `inner_join`).
+
+Now filter to countries with an IHDI of greater than 0.75. Then plot the data we will study.
+
+```{r}
+developed.country <- full.guns %>% 
+  filter(IHDI>0.75)
+head(developed.country)
+
+ggplot(developed.country, aes(x=Ownership, y=Homicides)) + 
+  geom_point() +
+  geom_text(aes(x=Ownership, y=Homicides, label=Country), nudge_x=0, nudge_y=0.1, size=3) + 
+  xlim(c(-5,90)) + xlab("Average Firearms per 100 Households") +
+  ylab("Homicides by Firearm per 100,000 People") +
+  theme_classic()
+```
+
+We see the United States stands on it is own! In terms of both the $x$-axis and $y$-axis. It is likely an outlier in both cases. Let's check with some simple Box-Whiskers plots.
+
+```{r}
+p1 <- ggplot(developed.country) + 
+  geom_boxplot(aes(x="", y=Ownership) ) +
+  labs(title="Gun Ownership") + xlab("") + 
+  theme_classic()
+p2 <- ggplot(developed.country) + 
+  geom_boxplot(aes(x="", y=Homicides) ) +
+  labs(title="Homicide Rate") + xlab("") + 
+  theme_classic()
+
+## Here we use grid.arrange()
+## from the gridExtra package
+## to put the two plots next to one another
+grid.arrange(p1, p2, nrow=1)
+```
+
+We see the United States values are outliers in both cases (...keep that in mind...).
+
+### Regression
+
+We fit a regression looking to predict Homicide Rate based on gun ownership.
+
+```{r models}
+full.fit <- lm(Homicides ~ Ownership, data=developed.country)
+autoplot(full.fit)
+```
+
+Looks like there are some major concerns regarding the residuals. Potential issues with linearity (line in the Residuals vs Fitted plot), constant variance (large increases in Scale-Location plot) and normality (observation 32). Looking at the Residuals vs Leverage plot, we also see observation 32 appears to have a large leverage value and is an outlier in terms of standardized residuals ($z$-score greater than 4). And not surprising based on the EDA above, observation 32 is...
+
+```{r}
+developed.country %>% 
+  filter(row_number()==32) %>%
+  select(Country)
+```
+
+So the United States looked like an outlier in our initial graphical assessment, and now it appears to be messing up our regression assumptions. For now, let's pretend it is not a problem and take a look at the regression output and the fitted line.
+
+```{r}
+summary(full.fit)
+```
+
+It appears that Gun ownership is a significant predictor ($F$-test of 34.88 on 1 and 30 degrees of freedom, $p$-value=$10^{-6}$) for the murder rate of a country, explaining a little over 50\% of the variability in homicide rates.
+
+Below is a clever way to plot the fitted line. A couple of notes about this code:
+
+1. In the `geom_line` statement, specify the data as being the `lm` object, here an object called `full.fit`. For the $y$-axis, tell it to use the `.fitted` component of the `lm` object, which will use the fitted values from the model.
+2. We use the `geom_text` function to put text in the location of points, where the label of the text is the Country. We *nudge* the label away from the point so it does not overlap. We did this above as well without explanation.
+
+```{r}
+ggplot(developed.country) + 
+  geom_line(data=full.fit, aes(x=Ownership, y=.fitted), col="blue", size=1.15) +
+  geom_point(aes(x=Ownership, y=Homicides)) +
+  geom_text(aes(x=Ownership, y=Homicides, label=Country), nudge_x=0, nudge_y=0.1, size=3) + 
+  xlim(c(-5,90)) + xlab("Average Firearms per 100 people") +
+  ylab("Homicides by firearm per 100,000 people") +
+  theme_classic()
+```
+
+Surely, it looks as if Gun Ownership predicts the homicide rate. But we also see there is a clear outlier and based on our residuals analysis, that outlier may be causing violations in our regression. Let's dig into this further...
+
+---------
+
+### A "deeper dive" into the problem
+
+Continuing with the analysis above, let's do the following:
+
+1. Create a dataset where we remove only the United States, and then fit a linear regression model predicting homicides as a function of gun ownership for this data. 
+2. Create a dataset where you remove only Sweden from the original data (i.e. keep the United States in the dataset!). Fit a linear regression model predicting homicides as a function of gun ownership. Compare/constrast this fitted model with the "no US" model in part 1.
+3. Create a dataset where you remove only Japan (keeping the United States and Sweden). Fit a linear regression model predicting homicides as a function of gun ownership. Compare/constrast this fitted model with the "no US" and "no Sweden" models.
+4. Make a plot with the fitted lines from parts 1, 2 and 3 above along with the original fit we provided above. That is, a plot of the 32 observations with 4 lines - 1 being the original fit (blue line above), and the other three being those fit in parts 1, 2, and 3 here. Compare/contrast the visual lines.  We will use different colors so we can distinguish the lines.
+
+```{r}
+# Create the data sets for questions 1-3
+no.us <- developed.country %>% 
+  filter(Country != "United States")
+no.sweden <- developed.country %>% 
+  filter(Country != "Sweden")
+no.japan <- developed.country %>% 
+  filter(Country != "Japan")
+  
+# Fit the 3 models
+no.us.fit <- lm(Homicides ~ Ownership, data=no.us)
+no.sweden.fit <- lm(Homicides ~ Ownership, data=no.sweden)
+no.japan.fit <- lm(Homicides ~ Ownership, data=no.japan) 
+
+# Check the model outputs
+summary(no.us.fit)
+summary(no.sweden.fit)
+summary(no.japan.fit)
+```
+
+*What do we observe?* 
+
+**The models without Japan and Sweden are similar to the full model (above). However, the model without the United States has a much shallower slope. (In fact, the coefficient for the slope is no longer significant in the "no US" model.)**
+
+Here's the code to make a plot comparing the fits:
+
+```{r}
+ggplot(developed.country) + 
+  geom_line(data=full.fit, aes(x=Ownership, y=.fitted), col="blue", size=1) +
+  geom_line(data=no.us.fit, aes(x=Ownership, y=.fitted), col="red", size=1) +
+  geom_line(data=no.sweden.fit, aes(x=Ownership, y=.fitted), col="orange", size=1) +
+  geom_line(data=no.japan.fit, aes(x=Ownership, y=.fitted), col="green", size=1) +
+  geom_point(aes(x=Ownership, y=Homicides)) +
+  geom_text(aes(x=Ownership, y=Homicides, label=Country), nudge_x=0, nudge_y=0.1, size=3) + 
+  xlim(c(-5,90)) + xlab("Average Firearms per 100 people") +
+  ylab("Homicides by firearm per 100,000 people") +
+  theme_classic()
+```
+
+**The lines for the full model, the "no-Sweden" model, and the "no-Japan" model are all almost identical (can barely tell them apart).**
+
+**Whereas, we can see graphically that the line for the "no-US" model is much closer to horizontal (shallow slope).**
+
+----
+
+### Leverage and Influence
+
+This data example is a classic case of an overly **influential point**. We can assess overly influential points in a number of different ways. 
+
+We *could* spend weeks on the topic of detecting overly influential and high leverage points. We do not want to! 
+
+A few key measures we will consider are Cook's Distance (also known as Cook's D) and the Hat values. Cook's D provides an overall measure of how influential a point is to your regression (that is, how it influences the fitted model). The Hat values provide a measure of how extreme the point is in terms of other predictor values (essentially this is the measure for Leverage). 
+
+Other measures include the DF-Fit and DF-$\beta$ values. We essentially explored these in the questions above (when you compared/contrasted the three fitted lines). Larger DF-Fit or DF-$\beta$ magnitudes indicate a particular variable may be overly influential. You should have noted based on your analysis that the United States appears to greatly influence the regression fit.
+
+We can calculate all these measures using the function `influence.measures()`.
+
+```{r}
+influence.measures(full.fit)
+```
+
+Note that this function is verbose. Be careful using this function (if you had 50,000 observations, imagine the output!!). 
+
+There is no set rule on what a *bad* Cook's D value or Hat value is. It is all relative. You'll note in the above that observation 32 (the United States) has a Cook's D value 10.4 when every other point has a value of 0.09 or smaller. Clearly point 32 is highly influential. You'll also note its hat value is 0.5095 when the next largest is about 0.09. Again, it is standing out. R provides a `*` for the United States under the `inf` column indicating it is likely overly influential.
+
+Likewise, when looking the `dfb.` and `dffit` values, you see that the values for the United States are extreme relative to the other variables. We can also explore these graphically. 
+
+The function `autoplot` for an `lm` object normally displays four plots (we did it earlier). It actually generates 6 plots, but only displays 4 by default. I can tell it to display all 6 or some combination with the `which` option:
+
+```{r}
+autoplot(full.fit, which=1:6)
+```
+
+We see there are two new plots here, one labeled `Cook's distance` and another `Cook's dist vs Leverage`. Let's take a closer look at these two plots, plots number 4 and 6:
+
+```{r}
+autoplot(full.fit, which=c(4,6))
+```
+
+**Certainly plots of these kinds of diagnositics are far more informative than a table.** The Cook's distance plot draws vertical lines for each observation with its associated Cook's D value. Similar to the table above, we are looking for values that look different than everything else. Here, observation 32 really jumps out (you cannot even see the lines for many of the points).
+
+The second plot reports the Cook's D value as a function of an observation's Leverage. This essentially allows me to link high leverage points and those that are potentially overly influential. Here, we see that the high level point (observation 32, the United States) also is very influential.
+
+### Distinction between Leverage and Influential Points
+
+* Leverage quantifies the *potential* for a point to exert strong influence on the regression analysis, it is not necessarily wrong or an error.
+   + Leverage depends only on the predictor variables.
+* Whether a point is influential or not depends on the observed value of the response (and potentially the leverage value).
+* Points in the extremes (in the scatter plot, points to the far left or far right of the plot) of the predictor variables will always be more influential than those in the middle. But this does not necessarily mean there is an error.
+
+### Final Thoughts on Leverage and Influential Points
+
+First, it is important to note that the ideas of leverage and influential points exist in multiple regression but we did not explore that here today. It is not as easily visualized as was done here, but can be explored (we did so conceptually in the previous class!).
+
+Second, what to do when you have a potential issues with a overly influential point.
+
+* First, check for errors:
+    + If the error is just a data entry or collection error and it can be corrected, do so!
+    + If the data point is not representative of the intended population of study, delete it.
+    + If the data point is a procedural error and invalidates the measurement, delete it.
+* Perhaps you have the wrong model:
+    + Did you leave out important predictor variables?
+    + Should you consider adding interaction terms?
+    + Is there any nonlinearity to be modeled? 
+    + You could consider Weighted Least Squares (not difficult, but outsite the scope of this class).
+* Decide on whether or not to delete observations:
+    + In general it is recommend you not delete data unless highly justified
+    + Do not delete data just because it does not fit your preconceived regression model. You are biasing your findings.
+    + If you delete any data after collecting it, justification is absolutely necessary in any reports
+    + If you are unsure on what to do with a point, consider analyzing the data twice -- once with and once without that particular datapoint (as we did above) -- report both analyses.
+    + As an alternative to the above, you can use the dummy variable approach we did in the previous lecture. 
+    
+
+
+
+# In-class Assignment
+
+We will be working with the Coronavirus data once again, today looking for leverage and influential points. 
+This assignment is designed to give you some experience digging into potential outlying/influential observations, while also providing a real-world example.
+
+**A warning:** This markdown includes three large images, in terms of physical size and the number of data points plotted, and knitting is a little slow.
+
+## Directions
+
+There are 10 parts in this assignment almost entirely involving answering questions based on provided output. In a few questions you are to modify some code but that is the only coding involved in this assignment. All computer output will be updated after knitting once you modify the necessary code chunks.
+
+## Data processing
+
+We begin by inputting the data and some data processing that should be very familiar at this point.
+
+```{r}
+census <- read.csv("censusRegions.csv")
+south <- census %>%
+  filter(Region=="South")
+
+us_county_data_raw <- read.csv("usCountyCoronaVirusData_2020-11-07.csv")
+
+county_data <- us_county_data_raw %>%
+  filter(State %in% south$State) %>%
+  mutate(Property_crime_rate = property_crime/pop*1000,
+         Corona_rate = Total_cases/pop*1000,
+         Death_rate = Total_deaths/pop*1000,
+         Pop_density = pop/Area ) %>%
+  select(CountyName, State, age, PercCollege, Pop_density, per_dem, Property_crime_rate, Corona_rate)
+```
+
+Note that for today we are only working with counties in the "South" as per the United States Census Bureau.
+
+At the conclusion of In-class assignment \#10, we fit the following model:
+
+```{r}
+original_fit <- lm( (Corona_rate+1)^(1/3) ~ age + PercCollege + per_dem + 
+                      log10(Pop_density) + log10(Property_crime_rate+1), data=county_data)
+summary(original_fit)
+```
+
+The expanded residual diagnostics (including measures of Cook's Distance) are provided below.
+
+```{r, fig.width=10, fig.height=10}
+autoplot(original_fit, which=c(1,2,3,5,4,6),
+         label.n=0)
+```
+
+Today we will be looking at residual plots to identify potential *concerning* points. **Keep in mind that looking at residuals plots is as much an <i>art</i> as it is a <i>science</i>**. If there were *hard rules* to follow... we could automate the process with an algorithm. **Trust your judgment!**
+
+
+----
+
+## Question 1
+
+Based on the supplied expanded residual plots above, how many observations do you think may have concerning Cook's D values?  How many residuals look concerning?
+
+**Potential hints:** 
+
+* You can look at the Cook's D cutoff value in the textbook but it tends to pick too many points, so use your best judgment.
+* Residuals should be approximately normal distributed, so standardized residuals should reasonably follow a standard normal distribution -- **the empirical rule** should apply to residuals. 
+
+**Answers**
+
+* I am concerned about 2 observations due to Cook's D.
+* I am concerned about 6 observations due to strange residuals values.
+
+
+
+
+
+
+## Question 2
+
+In the `autoplot` function we can specify the number of points in the residual plots to *label*. By default it will always label 3 points. In the previous code chunk it was set up to label 0 points. Edit the chunk below to label the number of points you deemed necessary based on the results of question 1 (the max of the two values you answered in question 1 should be used, we need to label *at least* that many points).
+
+
+
+```{r, fig.width=10, fig.height=10}
+autoplot(original_fit, which=c(1,2,3,5,4,6), label.n=6,
+         label.size=5, label.colour="blue", label.repel=TRUE)
+```
+
+
+## Question 3
+
+Based on the above plot, which observations (by row number) appear to be most influential or strange according to the residual diagnostic plots?  (*Hint:* the number of identified points for each should match question 1, not necessarily all those labeled in the plot).
+
+**Answers**
+
+* Observations 206, 239, 341, 1131, 997, 1067 are marked based on Cook's distance
+* Observations 239, 341, 206, 1067, 1131, 997 are marked based on strange residuals
+
+
+
+
+
+## Question 4
+
+The below code creates a new variable called `StrangeCounty` based on the row number. Edit the code (replacing `NULL`) so the observations you deemed strange in Question 1, 2 and 3 are marked in the code below. **Make sure to <i>knit</i> the document after editing this chunk.**
+
+```{r}
+county_data <- county_data %>%
+  mutate(StrangeCounty = ifelse(row_number() %in% c(206, 239, 341, 1131, 997, 1067),
+                                TRUE, FALSE))
+
+## Reminder, knit the document after editing!
+```
+
+
+
+## Question 5
+
+The list of counties you have flagged, along with their predictor variables and Coronavirus rate, are displayed below:
+
+```{r, echo=FALSE}
+county_data %>% 
+  filter(StrangeCounty) %>%
+  dplyr::select(-StrangeCounty) %>%
+  kable()
+```
+
+Does anything noteworthy jump out to you about these observations?
+
+**The corona rate of Stewart county and Chattahoochee county is very high compared to the median of the data set of 0.9.**
+
+
+
+## Question 6
+
+The code below constructs a scatterplot matrix of the variables used (transformed by logs) and highlights the *strange counties* above.
+
+```{r, fig.width=10, fig.height=10, cache=TRUE}
+county_for_plot <- county_data %>%
+  mutate(Log_pop_dens = log10(Pop_density),
+         Log_Prop_crime = log10(Property_crime_rate+1),
+         Cubed_root_Corona = (Corona_rate+1)^(1/3) ) %>%
+  arrange(StrangeCounty) %>%  
+  select(age, PercCollege, per_dem, Log_pop_dens, Log_Prop_crime, Cubed_root_Corona, StrangeCounty)
+
+ggpairs(county_for_plot, columns=1:6,
+        mapping=ggplot2::aes(color=StrangeCounty),
+        diag=list(continuous=wrap("densityDiag", alpha=0.45)) )
+```
+
+Do the highlighted variables appear strange or outlying compared to the non-highlighted variables?
+
+**Yes, the highlighted variables have a lower overall value than the non highlighted variables.**
+
+
+
+
+## Question 7
+
+The below code fits a new model, where it has removed the *strange* observations you marked in question 3.
+
+```{r, fig.width=10, fig.height=10}
+new_fit <- lm( (Corona_rate+1)^(1/3) ~ age + PercCollege + per_dem + log10(Pop_density) + log10(Property_crime_rate+1),
+               data=filter(county_data, !StrangeCounty) )
+autoplot(new_fit, which=c(1,2,3,5,4,6), label.n=0)
+```
+
+Do the residual diagnostic plots appear to be improved compared to the original plots? Does it appear there are new problems?  
+
+**The plots look fine now that the points have been removed, the normality still sways off from the end. The scales have changed and be smaller.**
+
+
+## Question 8
+
+The below code provides a side-by-side listing of the estimated $\beta$-coefficients from the original fitted model, and that of the model with the *strange* observations (from Question 1 and 2) removed.
+
+```{r, message=F}
+library(tidymodels)
+tidy(original_fit) %>% 
+  select(term, `Original model estimate`=estimate) %>%
+  left_join(tidy(new_fit) %>%
+              select(term, `New model estimate`=estimate), by="term") %>%
+  kable()
+```
+
+Does it appear those observations have a substantial impact on the fitted model? Are you concerned about the *strange* counties having undue influence on the fitted model?
+
+**No, overall the biggest change between the two only changed between 0.05.**
+
+
+
+## Question 9
+
+In questions 7 and 8 we fit regression models where we removed the so-called "strange" observations to study its effect on the fitted regression model. What is another approach we could take to account for the "strange" observations in a model?  How would that affect the model's overall performance?
+
+*Hint:* This problem can be answered through a discussion only, but you are allowed to include a code chunk with additional models and/or output if it helps explain your findings.
+
+**We can do what we did in the in-class assignment where we removed random points and see the influence on the regression line.**
+
+
+
+
+
+## Question 10
+
+In the notes for In-class 17 (gun ownership and homicide rates), the United States was an influential point (it alone caused the slope to be significant). Yet here, the flagged observations do not have as much of an effect on the fitted regression line (at least compared to in the notes!). Note that today we worked with a dataset of size $n=1422$ counties, while in the lecture notes the dataset only involved $n=32$ countries.
+
+Using results from your Intro Stat class (e.g., law of large numbers, Central Limit Theorem, standard error calculations ($\sigma/\sqrt{n}$)), discuss why the *strange* and outlying points from today likely do not have as much influence as the United States did in the lecture notes.
+
+**Since we are working with a data set that is 44x larger, four points will have naturally less influence due to the vast amount of other points.**
+
+

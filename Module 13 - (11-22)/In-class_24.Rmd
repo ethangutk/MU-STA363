@@ -1,0 +1,364 @@
+---
+title: "Class 24: Introduction to Logistic Regression"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning= FALSE)
+library(tidyverse)
+```
+
+### Review: Last session
+
+* What is odds? <br/><br/>
+  
+* What is an odds ratio?<br/><br/>
+  
+* What is the benefit of considering log odds?<br/><br/>
+
+
+We hinted at logistic regression last session. This session, we formally introduce it through an example. But we will start today by introducing the concept of generalized linear models.  
+
+----
+
+## Generalized Linear Models
+
+For most of this course, we have been focused on linear models (hence the function `lm`). One of the key assumptions we have been making with linear models is that the residuals are normally distributed. But not all models are based on normally distributed errors. 
+
+**Generalized linear models** (`glm`) allow for other types of error distributions. GLMs consist of two additional components:
+
+* A link function:\ it "links" the linear model form to the parameter describing the distribution of the response variable
+
+* Family: the distribution of the response variable
+
+Linear regression is a special case of GLM with
+
+* An *identity* Link: $f(\mu)=\mu$
+* Family: Normal Distribution
+
+Logistic regression is another type of GLM. In this case:
+
+* Link: log odds, $f(p)=\log\left(\frac{p}{1-p}\right)$
+    + This is also called the *logit* link function
+* Family: Binomial Distribution
+
+There are other types of GLM, for example, Poisson regression, or gamma regression, depending which distribution family we use for the responses. 
+
+logit(p) = log (p/1-p) = log odds
+
+----
+
+## Logistic Regression Example - Spiders!
+
+You may begin by watching this short introductory video:
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/fwUpjWKAsik?rel=0" frameborder="0" allowfullscreen></iframe>
+
+### Data Description
+
+The paper "Sexual Cannibalism and Mate Choice Decisions in Wolf Spiders: Influence of Male Size and Secondary Sexual Characteristics" (Animal Behaviour [2005]: 83-94) described a study in which researchers were interested in variables that might be related to a female wolf spider's decision to kill and consume her partner during courtship or mating. The accompanying data (approximate values read from a graph in the paper) are values of difference in body width (female - male) and whether cannibalism occurs, coded as 0 for no cannibalism and 1 for cannibalism for 52 pairs of courting wolf spiders.
+
+Source: "Introduction to Statistics and Data Analysis" by Roxy Peck, Chris Olsen, Jay L. Devore.
+
+### Some data visualization
+
+We have a binary response (cannibalism or not) and a single predictor (continuous variable, difference in size), so this allows us to be creative with visual displays. Below are two examples:
+
+```{r}
+spider <- read.csv("spiderCannibalism.csv")
+tail(spider)
+```
+
+Note the response variable, `Cannibalism` is recorded as a 1 or 0. Treating this as a numeric variable has some benefits for certain plots. For other plots, we may want to treat it categorically, so let's make a 'copy' of it an turned it into a categorical/logical variable. An example is below:
+
+```{r}
+spider <- spider %>% 
+  mutate(Male.consumed=as.logical(Cannibalism))
+
+ggplot(spider) + 
+  geom_density(aes(SizeDiff, fill=Male.consumed), alpha=0.2)+
+  labs(x="Size Difference (mm) (Female - Male)", 
+       title="Postmating Cannibalism in Wolf Spiders") +
+  theme_classic()
+```
+
+In the above plot, we segment the data into two groups (those where cannibalism occurred and those without) and look at the distribution of the size difference variable.  This provides some insight into what is happening. Notice we see that the `Male.consumed` group generally has larger size differences than the group where the male was not eaten.  Keep in mind here that in this plot we are really looking at things backwards (essentially how does $Y$ influence $X$).
+
+Another way to visualize this data is the following:
+
+
+```{r}
+ggplot(spider) + 
+  geom_point(aes(x=SizeDiff, y=Cannibalism) ) + 
+  labs(x="Size Difference (mm) (Female - Male)",
+       y="Cannibalism occured", 
+       title="Postmating Cannibalism in Wolf Spiders") + 
+  theme_classic()
+```
+
+
+Here we use the numeric version of the response, `Cannibalism`, instead of the categorical version `Male.consumed` we used earlier. Thus, we get 1 and 0 values on the plot. We also note it is difficult to parse out the individual observations: due to rounding of the size differences, many points are stacked on top of one another. One graphical way to handle this is with *jittering* -- wherein we add a little bit of a random "shake" to the data:
+
+```{r}
+ggplot(spider) + 
+  geom_jitter(aes(x=SizeDiff, y=Cannibalism), height=0, width=0.1, alpha=0.5) + 
+  labs(x="Size Difference (mm) (Female - Male)",
+       y="Cannibalism occured", 
+       title="Postmating Cannibalism in Wolf Spiders") + 
+  theme_classic()
+```
+
+Note the use of `geom_jitter` instead of `geom_point`. Although the `sizeDiff` variable is continuous, in the data it has been discretized (rounded to closest first decimal in increments of 2). By adding the jittering option (which basically adds some randomness to the observations), it spreads out the data (visually) so you can see some separation. We also use the `alpha` scaling option (where overlapping points will show up darker than stand-alone points) so we can see little clusters. We also cleaned up the labeling.
+
+Visually it looks like larger size differences result in more cases of spider cannibalism. How can we model this?  
+
+The answer is **Logistic Regression**.
+
+----
+
+### Modeling
+
+How do we model this?
+
+We will use some material from the previous module. First note that in this example our **response** variable is a **binary** outcome (True/False on whether postmating cannibalism occurred). In this sort of experiment, the parameter of interest is $p$ defined as
+
+$$p = P(\textrm{Postmating Cannibalism Occured})$$
+
+Since $p$ is a probability (or proportion), we know $0 \leq p \leq 1$, and thus standard linear regression is not appropriate. But consider the *odds* of cannibalism,
+
+$$odds = \frac{p}{1-p}$$
+
+we are now working in the domain $(0, \infty)$. Further, if we take the logarithm of the odds, that is $\log\left(\frac{p}{1-p}\right)$, we are working in the domain $(-\infty, \infty)$. Thus, linear regression is more valid when working with the log-odds, so we could consider the model
+
+$$logit(p) = \log\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 X$$
+
+In terms of $p$, the above model can be written as
+
+$$p = \frac{\exp\left(\beta_0 + \beta_1 X\right)}{1 + \exp\left(\beta_0 + \beta_1 X\right)}$$
+
+The above is known as a *logistic equation*. This is why this is called *logistic regression*.
+
+
+### Modeling in R
+
+To fit a logistic regression in R, we use the `glm` function, which stands for **generalized linear model**. In our derivation above, we are *generalizing* linear regression to work with some different link function (specified with the `link` option) of the data ... in this example, a logistic regression. Below is how we fit our model:
+
+```{r}
+spider.fit <- glm(Cannibalism ~ SizeDiff, data=spider, family=binomial(link=logit))
+```
+
+That's it! The code is very similar to the `lm()` and `aov()` code from before. The key thing with `glm()` is we need to specify the distribution of the response (the family). We can also specify the link function (this is technically not necessary here because `link=logit` is the default behavior for the binomial family), in this example that is `family=binomial`.
+
+We can then explore the output of the fitted model:
+
+```{r}
+summary(spider.fit)
+```
+
+We see the output is very similar to the summary output from an `lm()` fit we have used throughout the semester. The fitted model looks like this.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+spider.fit.plot.data <- data.frame(SizeDiff=seq(-1.2, 2.2, 0.01))
+spider.fit.plot.data <- spider.fit.plot.data %>% 
+  mutate(Predicted.Prob = predict(spider.fit, newdata=spider.fit.plot.data, type="response"))
+
+ggplot() + 
+  geom_jitter(data=spider, aes(x=SizeDiff, y=Cannibalism), height=0, width=0.1, alpha=0.5) +
+  geom_line(data=spider.fit.plot.data, aes(x=SizeDiff, y=Predicted.Prob)) + 
+    labs(x="Size Difference (mm) (Female - Male)",
+       y="Probability of Cannibalism", 
+       title="Postmating Cannibalism in Wolf Spiders") + 
+  theme_classic()
+```
+
+Below we describe important facts about the output.
+
+----
+
+### Interpretation of parameters
+
+* $\hat{\beta_0}$ = `r coef(spider.fit)[1]` 
+    + Negative, so when size difference = 0, log-odds of cannibalism will be negative
+    + This means the odds are less than 1
+    + So the probability of cannibalism when there is no size difference is less than 0.5
+    + Specifically, the odds are $\frac{p}{1-p} = \exp(\beta_0)$ = `r exp(coef(spider.fit)[1])` which is another way of saying the probability of cannibalism when there is no size difference is `r exp(coef(spider.fit)[1])/(1+exp(coef(spider.fit)[1]))`.  
+    + So if the spiders are the same size, there is only about a 4\% chance the female will kill and eat the male spider.
+
+* $\hat{\beta_1}$ = `r coef(spider.fit)[2]`
+    + Positive, so larger size difference leads to more cannibalism
+    + For every 1 unit increase in size difference, we would expect the log odds to increase by `r coef(spider.fit)[2]` units. 
+    + This gets a little weird when you try to interpret in terms of the the probability, since we are modeling the log odds.
+    + Think back to algebra: sums of *logs* are multiplication of *exp* terms, so all increases are relative to the *intercept* term. The odds $\frac{p}{1-p}$ will grow at a multiplicative rate of exp(`r coef(spider.fit)[2]`) = `r exp(coef(spider.fit)[2])` for each one-unit increase in the size difference. 
+
+#### Further discussion
+
+**Look at the fitted curve**
+
+If the female is 1 unit larger than the male in size, we basically have the intercept and slope canceling out ($-3.089 + 3.069(1) \approx  0$), and this results in a log odds near 0, which corresponds to the odds being near 1, and a probability of about 0.5 for cannibalism to occur. You can see this in the above plot.
+
+**Other considerations**
+
+* An AIC value is reported in the `summary()` output. It works just as before! We also see $z$-tests and corresponding $p$-values. These are known as the Wald tests for parameter significance.  More on these next time.
+
+* The "deviance" values are essentially measures of variability. The `Null deviance` can be considered the variability in the original data, whereas the `Residual deviance` can be considered the variability in the residuals. Using these values, we can construct pseudo-$R^2$ values and model comparisons similar to an $F$-test (done next time).
+
+* Many of the methods we have learned throughout the semester are still valid:\ predictive modeling, variable selection, etc. Some of these topics will be explored later.
+
+ 
+# In-class Assignment
+
+**Frahmingham Heart Study data**  The objective of the Framingham Heart Study was to identify the common factors or characteristics that contribute to CVD by following its development over a long period of time in a large group of participants who had not yet developed overt symptoms of CVD or suffered a heart attack or stroke. 
+The datafile `framingham.txt` contains selected variables for 4,658 participants in the study.  The variables are:
+
+* `age` - subject age in years
+* `sbp` - systolic blood pressure
+* `dbp` - diastolic blood pressure
+* `scl` - serum cholesterol level
+* `bmi` - BMI (Body Mass Index)
+* `chdfate` - Indicator of whether the subject has been diagnosed (1) or not (0) with coronary heart disease
+
+```{r}
+framingham <- read.table("framingham.txt", header=TRUE)
+head(framingham)
+```
+
+Today, we will explore the ability of two variables, age and BMI, ability to predict the prevalence of heart disease.
+
+----
+
+## Question 1
+
+Consider the following 3-dimensional plot. The $x$-axis is the record ages, the $y$-axis is the record BMI values, and the color of the points determines if heart disease is present (dark = yes, heart disease, light = no).
+
+```{r, echo=FALSE, message=FALSE}
+ggplot(framingham, aes(x=age, y=bmi) ) +
+  geom_jitter(shape=21, size=0.9, aes(fill=chdfate) ) +
+  scale_fill_continuous(type="gradient", low="gray90", high="gray10") +
+  theme_bw() + 
+  labs(x="Age (years)", y="BMI", fill="Heart Disease")
+```
+
+Describe any relationships you see in the plot. Namely, how does BMI behave? How does age behave? Does it appear there is a relationship between age, bmi and the prevalence of heart disease?
+
+**It does not appear that there is a relationship between the two, it is hard to tell off of this graph.**
+
+
+
+
+
+## Question 2
+
+Fit a logistic regression model that uses `age` and `bmi`, and the interaction between `age` and `bmi` as predictors of whether a person has been diagnosed with coronary heart disease (you can achieve this with the formula `chdfate ~ age * bmi`).  Provide model output that displays the estimated $\beta$-coefficients.
+
+```{r}
+# Create model
+heartDfit <- glm(chdfate ~ age * bmi, data=framingham, family=binomial(link=logit))
+
+# Show Summary
+summary(heartDfit)
+
+```
+
+
+----
+
+## Question 3
+
+Interpret the intercept to your fitted in terms of the log-odds, odds and probability for the prevalence of heart disease.  Do any of these values have contextual meaning?
+
+**-8.94, 0.134, 0.257 - Log odds**
+
+**0.000131041, 1.143, 1.29 - odds**
+
+**0.0001309, -7.993, -4.448 - probability**
+
+**When the age and bmi are zero, the probability of heart disease is 0.257. - Context**
+
+
+## Question 4
+
+We will now start tackling how to interpret the interaction of two numeric variables.  Consider the following (non-realistic) scenario.
+
+Interpret the effects that a one unit increase of BMI will have on the odds of heart disease for a person who is zero (yes zero) years old.
+
+**A one unit increase of BMI will increase his chances of heart disease by 1.29.**
+
+
+
+## Question 5
+
+Continuing the idea from question 4. Interpret the effects that a one unit increase of BMI will have on the odds of heart disease for a person who is forty years old (make sure to include information from the interaction term).
+0.257 * -0.00013 * 40
+**e^(0.257 + -0.0039264 * 40) = 1.105 **
+**A person that is forty years old, there is a 1.105 odds that for every unit increase of bmi, the odds increases by 1.105**
+
+
+
+## Question 6
+
+Use the fitted model in question 2 to predict the probability of heart disease for a 50 year old with a BMI of 29.
+
+**The probably of a person that is 50 with a BMI of 29 of getting heart disease is -**
+
+```{r}
+exp(predict(heartDfit, newdata=data.frame(age=50, bmi=29), type="response"))
+
+1.4737 / (1 - 1.4737)
+```
+
+
+
+
+
+
+
+
+## Question 7
+
+Consider the following two plots.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10}
+fake_data <- expand.grid(age=seq(29,67,0.1), bmi=seq(16,58,0.1))
+correct_model <- glm(chdfate ~ age * bmi, data=framingham, family=binomial(link=logit))
+fake_data <- fake_data %>%
+  mutate(prob_heart_disease = predict(correct_model, newdata=fake_data, type="response"))
+
+get_legend<-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+
+p1 <- ggplot(fake_data, aes(x=age, y=bmi) ) +
+  geom_tile(aes(fill=prob_heart_disease)) +
+  scale_fill_continuous(type="gradient", low="gray90", high="gray10") +
+  theme_bw() + 
+  labs(x="Age (years)", y="BMI", fill="Probability of\nHeart Disease") +
+  theme(legend.position="bottom")
+legend <- get_legend(p1)
+p1 <- p1 + theme(legend.position="none")
+
+p2 <- ggplot(fake_data, aes(x=age, y=bmi) ) +
+  geom_tile(aes(fill=prob_heart_disease)) +
+  scale_fill_continuous(type="gradient", low="gray90", high="gray10") +
+  geom_jitter(data=framingham, aes(fill=chdfate), shape=21, size=0.9,  ) +
+  theme_bw() + 
+  theme(legend.position="none") +
+  labs(x="Age (years)", y="BMI", fill="Heart Disease")
+library(gridExtra)
+gridExtra::grid.arrange(p1, p2, legend, ncol=2, nrow=2,
+                        layout_matrix=rbind(c(1,2),c(3,3)),
+                        widths=c(2.7,2.7),heights=c(2.5, 0.3) )
+```
+
+The plot on the left provides the predicted probabilities for all age and BMI values in the scope of the data (at least marginally). The plot on the right includes the true data values overlayed on the predicted values. You should note that the model predicts those with really high ages and large BMI values to see a decrease in the prevalence of heart disease. Also, there is an individual aged about 60 with a BMI of about 50 who does not have heart disease. 
+
+How would you explain this counterintuitive result? Please answer by referring to statistical material previously covered in this class (hint: revisit some topics in regression, including module 09).
+
+**There could be other variables involved in influencing the answer besides BMI and age, thus thats why we see a counterintuitive result.** 
+
+
+
+

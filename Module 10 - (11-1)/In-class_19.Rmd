@@ -1,0 +1,174 @@
+---
+title: "Class 19: Model/Variable Selection Continued"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+library(ggfortify)
+library(leaps)
+library(car)
+library(GGally)
+```
+
+## Model Selection - a continuation from In-class 18
+
+**Model selection** is the act of selecting a statistical model from a set of candidate models and/or predictor variables. That is, in a given problem where you are looking to build a model for a response variable $Y$ and you have a set of possible predictor variables $X_1$, $X_2$, $X_3$, $\ldots$, how do you choose the best model? 
+
+The area of **model selection** continues to augment and connects classic statistics to machine learning and data science. We only scratch the surface here. For more information, feel free to consult the source of all knowledge, Wikipedia!
+
+https://en.wikipedia.org/wiki/Model_selection
+
+----
+
+## Data: predictors of rock strength
+
+Today we will revisit the rock strength data from the previous class. For your reference, the description of the data has been reproduced here.
+
+The file `rockstrength.csv` contains the uniaxial compressive strength (`UCS`) of 30 rocks/minerals along with 8 potential predictor variables: Percentage Quartz (`quartz`), Percentage Plagioclase (`plag`), Percentage K. feldspar (`kfds`), Percentage Hornblende (`hb`), Grain size in mm (`gs`), grain area in mm^2 (`ga`), shape factor (`sf`) and aspect ratio (`ar`).
+
+We will consider this data as a working example. First, read the data.
+
+```{r message=FALSE}
+rocks <- read.csv("rockstrength.csv")
+head(rocks)
+```
+
+## Previous models
+
+After some exploration of our data, we considered the following models:
+
+```{r, echo=FALSE, message=FALSE}
+# Full main effects model
+full.fit <- lm(UCS ~ quartz + plag + kfds + hb + gs + ga + sf + ar, data=rocks)
+
+# Backward selection model
+step.pick.backward <- stats::step(full.fit, direction="backward", trace=FALSE)
+
+# Reduced backward selection model (removed terms that were not significant)
+remove.plag.hb.ar <- lm(UCS ~ quartz + gs + sf, data=rocks)
+
+# Forward selection model (remember, this requires fitting an intercept-only model first)
+null.fit <- lm(UCS ~ 1, data=rocks)
+step.pick.forward <- stats::step(null.fit, scope=formula(full.fit), direction="forward", trace=FALSE)
+
+# Summarize the results
+bind_rows(
+  glance(full.fit) %>% mutate(Model="Full Model"),
+  glance(step.pick.backward) %>% mutate(Model="Backward Stepwise"),
+  glance(step.pick.forward) %>% mutate(Model="Forward Stepwise"), 
+  glance(remove.plag.hb.ar) %>% mutate(Model="Trimmed Backward Selection") ) %>%
+  select(Model, Adj.R.Squared = adj.r.squared,
+         AIC, BIC) %>%
+  kable()
+```
+
+
+----
+
+## Best subsets regression
+
+The stepwise technique is nice because it will output a model that it deems *best* based on some criteria (AIC) and procedure. Yet, we see potential problems with the selected model (insignificant terms in backward selection, differing models were selected between forward and backward methods).  Furthermore, if we used a different criteria (say BIC), we may get a different model since each step could result in different variable selection. 
+
+So, an arguably better approach is to **look at many subset models of different sizes**.  Here, we use the `regsubsets` function in the `leaps` package. 
+
+The idea of best subsets regression is the following:
+
+* Here we have 8 possible predictor variables.  This leaves $2^8$ possible linear main-effects models (i.e. without any interactions or polynomial terms). So there are 256 possible linear models we can fit. Of all 256 models, one will have the best AIC, likely a different model will have the best BIC, and another could have the best $R^2_a$. To complicate matters even further, multiple models may essentially have the same $R^2_a$ or AIC values!  Furthermore, from a practical perspective, do we really want to look at all 256 models?
+
+A computer can do much of the work for us. In the example below, we tell R to **determine the 3 best models of each size** containing up to 8 predictors. ("Size" refers to the number of predictors in the model.)
+
+```{r}
+fit.subs <- regsubsets(formula(full.fit), data=rocks, nbest=3, nvmax=8)
+summary(fit.subs)
+```
+
+We see many models were fit. How can we compare or select from among these models?  We can build a quick plot (ugly! make sure to specify `legend=FALSE`) to compare the fitted models using the `subsets` function in the `car` package.
+
+```{r}
+subsets(fit.subs, statistic="adjr2", legend=FALSE)
+subsets(fit.subs, statistic="bic", legend=FALSE)
+```
+
+These plots are very handy (albeit aesthetically ugly ... you can find more attractive plots in the textbook). We look for inflection points (where the bend occurs) in the pattern.  It sure seems to be around the 3 or 4 subset models. 
+
+Let's run the algorithm again focusing on the best models with at most 4 predictor variables.
+
+```{r}
+summary(regsubsets(formula(full.fit), data=rocks, nbest=1, nvmax=4))
+```
+
+The *best* model with 4 terms has `quartz`, `hb`, `ga` and `sf`. The *best* model with 3 terms has `quartz`, `gs` and `sf`. 
+
+Note that we built similar models above using forward selection and backward selection. Let's compare these two models.
+
+```{r}
+fit.best3 <- lm(UCS ~ quartz + gs + sf, data=rocks)
+fit.best4 <- lm(UCS ~ quartz + hb + ga + sf, data=rocks)
+summary(fit.best3)
+AIC(fit.best3)
+BIC(fit.best3)
+summary(fit.best4)
+AIC(fit.best4)
+BIC(fit.best4)
+```
+
+Given that $R^2_a$ is better, and the AIC and BIC values are also better for the model with the 4 terms, we would argue it is better. 
+
+----
+
+## Summary
+
+By backward selection, we chose the model
+
+```{r}
+step.pick.backward
+```
+
+and by forward selection and the best subsets approach, we chose
+
+```{r}
+step.pick.forward
+```
+
+From our earlier analysis, it appears either `gs` or `ga` are nearly equivalent and equally valid options. So what about a similar model with `gs` instead of `ga`?
+
+```{r}
+another.fit <- lm(UCS ~ quartz + hb + sf + gs, data=rocks)
+summary(another.fit)
+AIC(another.fit)
+BIC(another.fit)
+```
+
+We can summarize the fits with code such as the following:
+
+```{r}
+bind_rows(
+  glance(full.fit) %>% mutate(Model="Full: quartz-plag-kfds-hb-gs-ga-sf-ar"),
+  glance(step.pick.backward) %>% mutate(Model="Backward: quartz-plag-hb-gs-sf-ar"),
+  glance(step.pick.forward) %>% mutate(Model="Forward & Subsets: quartz-hb-ga-sf"), 
+  glance(another.fit) %>% mutate(Model="Other: quartz-hb-gs-sf") ) %>%
+  select(Model, Adj.R.Squared = adj.r.squared,
+         AIC, BIC) %>%
+  kable()
+```
+
+### Which model should we use?
+
+There is no ***correct*** answer to this question! These tools are exactly that ... *tools*. They help us, the practitioner, choose the model!
+
+Based on all the above, the one finding that appears consistent is that the full-fit model is less than ideal. The other three models have comparable performance (all measures are fairly close) with BIC separating the backward selection method from the others.
+
+If we needed to make a decision based on what has been presented, we would use a model with `quartz`, `hb`, `sf` and `ga`; it has the second-largest $R^2_a$ (and only 0.003 less than the largest), the smallest AIC and BIC of those considered and contains only 4 predictor variables (compared to the 6-predictor variable model with a slightly larger $R^2_a$).  We will see another method to compare models in a future module.
+
+
+## In-class Assignment
+
+Finish the in-class assignment from class 18. In addition, use best subsets selection to find the best model for predicting used car prices in terms of AIC. How does the best subsets model compare to the best model from question 12 in in-class assignment 18? 
+
+

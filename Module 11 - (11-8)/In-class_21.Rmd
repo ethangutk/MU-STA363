@@ -1,0 +1,292 @@
+---
+title: "Class 21: Assignment"
+author: "Your Name"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(gridExtra)
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(lindia)
+library(leaps)
+library(car)
+library(GGally)
+library(caret)
+library(kableExtra)
+```
+
+
+# Model Validation Activity: Seoul, Korea Bike Rentals
+
+The city of Seoul, in South Korea, has a city-wide bike rental program where patrons may rent a bicycle at a bike rack and ride it to another bike rack in the city. A similar system is in place in Cincinnati, Ohio.
+
+The city manager recognizes that there is a morning rush on bike rentals on most days. In an effort to build a model to predict the number of bikes that will be rented, the manager recorded the number of bikes rented each hour along with several meteorological variables in the city. After some initial data processing, each record in the file `BikeSharingData.csv` is a randomly selected day in 2018 recording the following variables:
+
+* `Season` = A character/factor variable indicating one of the four seasons: Autumn, Winter, Spring or Summer.
+* `Holiday` = An indicator variable indicating if that day was a recognized holiday.
+* `Temperature` = The mean temperature (Celsius) in Seoul on the morning of the bike rental.
+* `Humidity` = The mean relative humidity (%) in Seoul on the morning of the bike rental.
+* `Wind_speed` = The mean wind speed (meters per second) in Seoul on the morning of the bike rental.
+* `Visibility` = The mean visibility (in meters) in Seoul on the morning of the bike rental.
+* `Dew_point` = The mean dew point (Celsius) in Seoul on the morning of the bike rental.
+* `Solar_radiation` = The mean amount of solar radiation (in mega joules per squared meter) in Seoul on the morning of the bike rental.
+* `Rainfall` = The mean amount of rainfall (millimeters) in Seoul on the morning of the bike rental.
+* `Snowfall` = The mean amount of snowfall (centimeters) in Seoul on the morning of the bike rental.
+* `Rented_bikes` = The number of bikes rented in the city from 7am to 10am on a given morning.
+
+
+There are two goals for today: (1) choose the best predictive model for bike rentals on a given day and (2) use it to predict the number of bikes that will be rented on 20 random days. 
+
+## Reading the data
+
+```{r}
+bikes <- read.csv("BikeSharingData.csv")
+bikes_to_predict <- read.csv("BikeSharingToPredict.csv")
+
+glimpse(bikes)
+glimpse(bikes_to_predict)
+```
+
+Some things to note:
+
+* the data `bikes` is the data set that contains the data we will build the model with.
+* the data `bikes_to_predict` does not include a `Rented_bikes` variable -- We need to predict it!
+
+**Caveat**: In a real application, it is very unlikely we would know all these meteorological values and not the number of rented bikes. So, in a real application, we would likely input *forecasted* meteorological values into the model we choose.
+
+
+## Part 1 - Choosing Candidate Models
+
+
+### Problem 1 - EDA
+
+Before we start fitting candidate models, you should start by performing an EDA of the data. Based on the scatterplot matrix below, which predictors are likely to be important predictors of bike rentals? Are there any variables that should be transformed?
+
+```{r}
+ggpairs(bikes, columns=c(3:11))
+```
+
+**Temperature, dew point, and solar radiation are the three highest correlations. Since rainfall and snowfall are very skewed, they need to be transformed.**
+
+
+### Transforming Rainfall and Snowfall
+
+From the scatter plot matrix, you should notice that both rain and snow are very zero-inflated (there are many days with no precipitation at all). In this context, from the plot, and by logic, we can deduce that the probability of going for a bike ride is low if it is raining or snowing. And the amount of rain or snow is not likely to have a great impact on that decision.
+
+So instead, let's create a new variable that just indicates whether there is any precipitation (rain or snow) on a given day.
+
+```{r}
+bikes <- bikes %>%
+  mutate(Precipitation = ifelse( (Rainfall>0) | (Snowfall>0), TRUE, FALSE) )
+```
+
+
+### Problem 2 - Data Evaluation
+
+When making out-of-sample predictions and performing validation studies, we need to pay special attention to the variables available for prediction. For example, if the `bikes_to_predict` dataset did not include Temperature, then it would not make sense to use Temperature as a predictor in any models.
+
+We also need to be careful with factors levels. For statistical modeling to work, we need variability in our data. As an extreme example, imagine we used biological sex as a predictor variable in a model, but the entire sample was collected from females, we would be unable to measure the impact of sex on the model. This can be problematic when performing a validation study. To explain, consider a factor level that only appears 1 time in an entire dataset. When performing a $k$-fold CV study, at some point that single observation will be in the testing fold, and thus create problems estimating a model from the training folds.
+
+In a similar vein, if our out-of-sample predictions only contain a single factor level, it does not make much sense to include that predictor in the model, since it will have no impact on the final predictions.
+
+With all that said, consider the following output (some `group_by()` and `summarize()` functions):
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+bikes %>%
+  group_by(Season, Holiday) %>%
+  summarize(N=n() ) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+
+bikes_to_predict %>%
+  group_by(Season, Holiday) %>%
+  summarize(N=n() ) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = "striped", full_width = FALSE)
+```
+
+Based on the above output, does it make sense to remove one of the categorical predictor variables from consideration?  Justify your choice. 
+
+**Since the predict data set has no holidays, we must remove it from the bikes data set in order for our prediction to make sense.**
+
+
+### Model Selection
+
+Although we have omitted it here, a Box-Cox plot for the full model suggests a square root transformation, so we have used this transformation for all of the subsequent models. In fact, the square root transformation is a very common choice with count data (e.g. counting the number of bikes rented), so it is not surprising that it works well here. We will start with the following models (to save time, we have fit these models for you):
+
+```{r}
+# Full model
+model.full <- lm(sqrt(Rented_bikes) ~ Temperature + Humidity + Wind_speed + Visibility + Dew_point + Solar_radiation + Season + Precipitation, data=bikes)
+
+# Backward selection model
+model.back <- stats::step(model.full, direction="backward", trace = 0)
+
+# Forward selection model
+null.fit <- lm(sqrt(Rented_bikes) ~ 1, data=bikes)
+model.forw <- stats::step(null.fit, scope=formula(model.full), direction="forward", trace=0)
+
+
+```
+
+**If necessary, remove any variables from the above models based on your answer to Problem 2.** 
+
+
+### Problem 3 - Which variables were chosen in each of the selection methods above?
+
+```{r}
+# Look at the model output here with the "summary()" function
+
+# Full model
+summary(model.full)
+
+# Backward selection model
+summary(model.back)
+
+# Forward selection model
+summary(model.forw)
+```
+
+**In the forward selection model has precipitationTRUE, seasonWinter, and solar radiation. In the backward selection model, the variables chosen were SeasonWinter and solar_radiation. Both models and have intercept.**
+
+
+### Other Candidate Models
+
+We will also consider the following models selected from a best subsets selection process. The code that generated these models is shown in the first chunk below (you don't need to do anything with this chunk, it is just there for your reference.)
+
+```{r, eval=FALSE}
+fit.subs <- regsubsets(formula(model.full), data=bikes, nbest=1, nvmax=9)
+car::subsets(fit.subs, statistic="adjr2", legend=FALSE)
+car::subsets(fit.subs, statistic="bic", legend=FALSE)
+```
+
+The chunk above suggests that the best model has either 3 or 4 predictors. So we will consider the following models:
+
+```{r}
+# Best 3-predictor model
+model.subs3 <- lm(sqrt(Rented_bikes) ~ Solar_radiation + Season, data=bikes)
+# Best 4-predictor model
+model.subs4 <- lm(sqrt(Rented_bikes) ~ Solar_radiation + Season + Precipitation, data=bikes)
+```
+
+You may notice that the "3-predictor" model only has 2 predictors! (And likewise, the 4-predictor model only has 3 predictors). What happened here? The best subsets treated the different season indicators as different variables. So it actually selected a model with "SeasonSummer" and "SeasonWinter," but not "SeasonSpring." This suggests that there is a difference in bike rentals between summer and autumn and between winter and autumn. But there is no difference between spring and autumn. This makes sense because the weather patterns in spring and autumn tend to be similar! With this in mind, we will combine spring and autumn in the Season variable and create a new vairable called Season3:
+
+```{r}
+bikes <- bikes %>%
+  mutate(Season3 = case_when(Season %in% c("Autumn", "Spring") ~ "Autumn-Spring", Season == "Winter" ~ "Winter",
+                             TRUE ~ "Summer"))
+```
+
+Now, we will re-fit the best subsets models with this new 3-level model. 
+
+```{r}
+# Best 3-predictor model
+model.subs3 <- lm(sqrt(Rented_bikes) ~ Solar_radiation + Season3, data=bikes)
+# Best 4-predictor model
+model.subs4 <- lm(sqrt(Rented_bikes) ~ Solar_radiation + Season3 + Precipitation, data=bikes)
+```
+
+
+## Part 2 - $k$-fold Cross-validation Study
+
+In this part, we will perform a 5-fold cross validation study. 
+
+
+### Problem 3 - Validation Study Control
+
+Set up the control for the validation study in the `caret` package, ie, specify the method you would use for the validation (hint: `trainControl`).
+
+**Note that in the code chunk we provided a template for you to fill in. You need to remove the "eval=FALSE" code chunk option once you complete the code, otherwise it does not execute the code in the knitted file.**
+
+```{r}
+our_study <- trainControl(method="repeatedcv", number=5, repeats=10)
+```
+
+
+### Problem 4 - Build Models
+
+Five models were considered in Part 1 to predict the number of rented bikes (full model, backward selection model, forward model, best subsets size 3, and best subsets size 4). Perform the CV study for each of these four models (hint: use the `train()` function, and make sure to set the random number generate seed to 2021 **before each `train()` call** using `set.seed(2021)`).
+
+**Note that in the code chunk we provided a template for you to fill in. You need to remove the "eval=FALSE" code chunk option once you complete the code, otherwise it does not execute the code in the knitted file.**
+
+```{r}
+set.seed(2021)
+full_fit <- train(sqrt(Rented_bikes) ~ Temperature + Humidity + Wind_speed + Visibility + Dew_point + Solar_radiation + Season + Precipitation, data=bikes, method="lm", trControl=our_study)
+
+set.seed(2021)
+back_fit <- train(sqrt(Rented_bikes) ~ Temperature + Humidity + Dew_point + Solar_radiation + Season + Precipitation, data=bikes, method="lm", trControl=our_study)
+
+set.seed(2021)
+forw_fit <-  train(sqrt(Rented_bikes) ~ Solar_radiation + Season + Precipitation, data=bikes, method="lm", trControl=our_study)
+
+set.seed(2021)
+subs3_fit <- train(sqrt(Rented_bikes) ~ Solar_radiation + Season3, data=bikes, method="lm", trControl=our_study)
+
+set.seed(2021)
+subs4_fit <- train(sqrt(Rented_bikes) ~ Solar_radiation + Season3 + Precipitation, data=bikes, method="lm", trControl=our_study)
+```
+
+
+### Problem 5 - Model Comparison
+
+Use the `resamples()` function and `summary()` functions to compare the performance of the four models in terms of MAE and RMSE. Which model do you deem best in terms of MAE? Which is best in terms of RMSE? (*hint:* this question is not as straightforward as it seems, you should consider the entire distribution of MAE and RMSE values to make your determination of which is best for each).
+
+**Note that in the code chunk we provided the code that will produce the output that summarizes the RMSE and MAE values for the five different models. You need to remove the "eval=FALSE" code chunk option once you complete the code to execute the validation for these five models in the previous code chunk, otherwise it does not execute the code in the knitted file.**
+
+```{r}
+cv_study_results <- resamples(list("Full"=full_fit, "Back"=back_fit, "Forw"=forw_fit, "Sub3" = subs3_fit, "Sub4" = subs4_fit))
+ 
+summary(cv_study_results)
+bwplot(cv_study_results, metric=c("RMSE", "MAE"))
+```
+
+**The best model in terms of MAE is the sub4 model since it has the lowest mean. The best model in terms RMSE is the sub 4 model since it has the lowest mean.**
+
+
+### Problem 6 - Decision Time!
+
+The pressure is on, you need to pick **one**, and only one, model in which to make your predictions. Which model, of the five considered, do you pick and why?
+
+**Sub4's MAE value has the lowest mean The forward model is very similar to the Sub4 but we choose the sub 4 since it is the lowest.** 
+
+
+
+## Part 3 - Predictions
+
+### Problem 7
+
+Use the model you picked in part 6 to predict the number of bikes rented (in the original units!) in the dataset `bikes_to_predict`. Specifically do the following:
+
+* Fit the model to the entire `bikes` data using the `lm()` function.
+* Append the predictions (original units) to the dataset `bikes_to_predict` (use `predict()` or `add_predictions()` and `mutate()`) 
+* Write this dataset to a new file called `BikesSharingWithPredictions.csv` using the `write_csv()` function.
+* Submit your *knitted* html **and** the csv file to canvas.
+
+
+**Note that in the code chunk we provided a template for you to fill in. You need to remove the "eval=FALSE" code chunk option once you complete the code, otherwise it does not execute the code in the knitted file.**
+
+```{r}
+# Sub3 model --
+my_model <- lm(sqrt(Rented_bikes) ~ Solar_radiation + Season3 + Precipitation, data=bikes)
+
+# Fix Variables
+bikes_to_predict <- bikes_to_predict %>% mutate(Precipitation = ifelse( (Rainfall>0) | (Snowfall>0), TRUE, FALSE) )
+
+bikes_to_predict <- bikes_to_predict %>% mutate(Season3 = case_when(Season %in% c("Autumn", "Spring") ~ "Autumn-Spring", Season == "Winter" ~ "Winter", TRUE ~ "Summer"))
+
+
+bikes_to_predict <- bikes_to_predict %>%
+  modelr::add_predictions(my_model, var="Predicted_response") %>%
+  mutate(Predicted_response = Predicted_response^2)
+
+
+## Let's take a look to make sure it worked
+glimpse(bikes_to_predict)
+
+## Output the file!
+write_csv(bikes_to_predict, file="BikesSharingWithPredictions.csv")
+```
+
+

@@ -1,0 +1,456 @@
+---
+title: "Class 18: Model/Variable Selection"
+author: "Hughes/Fisher"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+
+library(tidyverse)
+library(knitr)
+library(ggfortify)
+library(tidymodels)
+library(leaps)
+library(car)
+library(GGally)
+```
+
+## Model Selection
+
+**Model selection** is the act of selecting a statistical model from a set of candidate models and/or predictor variables. That is, in a given problem where you are looking to build a model for a response variable $Y$ and you have a set of possible predictor variables $X_1$, $X_2$, $X_3$, $\ldots$, how do you choose the best model? 
+
+The area of **model selection** continues to augment and connects classic statistics to machine learning and data science. We only scratch the surface here. For more information, feel free to consult the source of all knowledge, Wikipedia!
+
+https://en.wikipedia.org/wiki/Model_selection
+
+----
+
+## Data: predictors of rock strength
+
+The file `rockstrength.csv` contains the uniaxial compressive strength (`UCS`) of 30 rocks/minerals along with 8 potential predictor variables: Percentage Quartz (`quartz`), Percentage Plagioclase (`plag`), Percentage K. feldspar (`kfds`), Percentage Hornblende (`hb`), Grain size in mm (`gs`), grain area in mm^2 (`ga`), shape factor (`sf`) and aspect ratio (`ar`).
+
+We will consider this data as a working example. First, read the data.
+
+```{r message=FALSE}
+rocks <- read.csv("rockstrength.csv")
+head(rocks)
+```
+
+
+### Visualize the data
+
+```{r, fig.width=8, fig.height=8}
+# Do not plot the ID values. Not meaningful
+# List the UCS last, 3:10 = 3,4,5,...,10
+ggpairs(rocks, columns=c(3:10,2)) 
+```
+
+Many variables appear correlated with `UCS` (namely, `quartz`, `hb`, `gs`, `ga` and `sf`).
+
+### Fit a full main effects model
+
+We begin by fitting a full main effects model using all predictor variables:
+
+```{r}
+full.fit <- lm(UCS ~ quartz + plag + kfds + hb + gs + ga + sf + ar, data=rocks)
+autoplot(full.fit)
+```
+
+There is a little bit of goofiness in the Residuals vs Fitted plot and Scale-Location plot, indicating the variance may be increasing with the mean. However, linearity and normality look okay. A Box-Cox plot has been excluded here but suggests that no transformation is necessary. So overall, we feel it is reasonable to proceed with using the model for inference purposes.
+
+```{r}
+summary(full.fit)
+```
+
+We note that only `quartz` and `sf` appear as significant predictors for `UCS` when accounting for the other variables. Based on these results and the scatterplot matrix above, we suspect multicollinearity could be influencing our model. We can check that by looking at the Variance Inflation Factors (VIFs):
+
+```{r}
+vif(full.fit)
+```
+
+As suspected, there are issues with `gs` and `ga` (note the scatterplot matrix again!). Not surprising.
+
+So chances are, only one of `gs` or `ga` is contributing meaningful information to our model (look at the data description -- they are essentially the same!).
+
+----
+
+## Information Criterion
+
+Besides looking at $R^2_a$ and the residual standard error, another method to compare models is via an *Information Criteria*. Two popular techniques are **Akaike Information Criteria (AIC)** and **Bayesian-Schwarz Information Criteria (BIC)**. These methods are similar to $R^2_a$ in that they balance goodness-of-fit (small residual error) with a penalty term for including extraneous variables. The respective equations are
+$$AIC = n\log(RSS/n) + 2p, ~~~~~ BIC = n\log(RSS/n) + \log(n)p$$
+where $RSS$ is the residual sum of squares, $n$ is the sample size and $p$ is the number of parameters fit (essentially the number of $\beta$-terms). **In general, we prefer models with a small AIC or BIC value** (similar to wanting a larger $R^2_a$). We can extract the AIC and BIC for a given model using the `AIC()` and `BIC()` functions. Consider the following examples:
+
+```{r}
+fit1 <- lm(UCS ~ quartz + gs, data=rocks)
+fit2 <- lm(UCS ~ quartz + ga, data=rocks)
+fit3 <- lm(UCS ~ quartz + gs + ga, data=rocks)
+summary(fit1)
+summary(fit2)
+summary(fit3)
+```
+
+Note that in `fit3` we include both variables `gs` and `ga` and the $R^2$ value has increased (granted, not by much) compared to models `fit1` and `fit2`. We also note that the adjusted $R^2$ has actually *decreased* from `fit1` to `fit3`. This indicates the addition of `ga` to a model with `quartz` and `gs` is unnecessary.  However, moving from `fit2` to `fit3` appears justified.  In a similar fashion, we can consider the AIC and BIC values:
+
+```{r}
+AIC(fit1)
+AIC(fit2)
+AIC(fit3)
+BIC(fit1)
+BIC(fit2)
+BIC(fit3)
+```
+
+For both AIC and BIC, `fit2` and `fit3` have larger values than `fit1`. Thus we have multiple measures suggesting that `fit1` is the best fit of those considered here.
+
+**NOTE \#1:** $R^2_a$, AIC and BIC do not necessarily pick the same model!
+
+**NOTE \#2:** AIC and BIC are unit-less values. Further, AIC or BIC values within $\pm 2$ units are generally considered equivalent.
+
+----
+
+## Stepwise Regression
+
+The above example involving `fit1`, `fit2` and `fit3` is an example of *model selection* (albeit not a complete example). We used $R^2_a$, AIC and BIC to pick a model. You may ask yourself, why not try other variables?  Perhaps if we added `hb` as a variable onto `fit1`, it would help?  What about `plag`?  What about `kfds`?
+
+We can algorithmically step through each predictor variable, adding variables (or subtracting them) -- this could take a while!  Fortunately, a computer is great at doing repetitive tasks, so we can do it.
+
+
+### Backward selection
+
+The idea is to start a model with all predictors in it (so here, `UCS` is estimated with `quartz`, `plag`, `kfds`, `hb`, `gs`, `ga`, `sf` and `ar`) and the AIC is calculated for this model.
+
+* Each predictor is removed one at a time and the model is refit -- so a model with everything except `quartz` is fit. Then a model with everything but `plag` is fit, and so on. The AIC is calculated for each.
+* The model that improves AIC (biggest decrease) is selected as the new best model.
+* The next step involves removing each remaining variable one at a time looking for an improved AIC (so removing the least important two variables).
+* This process continues until the AIC starts to get worse (i.e. when AIC increases).
+
+### Forward selection
+
+The forward selection algorithm is very similar to backward selection but starts with little (or no) variables, and works its way up by adding variables that improve the fit. 
+
+In R, backward and forward selection methods are implemented in the functions `step` in the `stats` library (build into R). 
+
+----
+
+## A tangent about coding
+
+As your knowledge of statistics and modeling expands, you will find you need to use more and more add-on packages in R. Today we will use the `step()` function, which is built into R. However, some other add-on packages have their own versions of the `step()` function. This is known as *masking* in the computer science/programming world. Occasionally we need to be explicit and tell R which version of the function we wished to use, using the `::` notation. Below we tell R to use the `step()` function in the `stats` package via `stats::step()`. 
+
+----
+## Example with rock strength
+
+First, we remind ourselves of the full model fit above. 
+
+```{r}
+summary(full.fit)
+```
+
+The model is significant (overall $F$-test, $p$-value is near 0). The model explains about 83% of the variability in `UCS`. It appears only `quartz` and `sf` are significant (and barely at that, both $p$-values just under 0.05) but we also note the VIF values (multicollinearity is messing up these $t$-tests). Namely, `gs` and `ga` are HIGHLY related. 
+
+#### Backward selection illustration
+
+```{r}
+step.pick.backward <- stats::step(full.fit, direction="backward")
+summary(step.pick.backward)
+vif(step.pick.backward)
+```
+
+We see our backward selection model has a similar R-squared to the full model but with an improved $R^2_a$. We know it has a better AIC value (the algorithm picks based on AIC). There are no issues with multicollinearity (VIF values are all fairly small). The chosen model still includes some insignficant terms which leads to the question: do `plag`, `hb` and `ar` significantly improve the model?  We can statistically test this based on a reduced $F$-test (covered a few weeks ago).
+
+```{r}
+remove.plag.hb.ar <- lm(UCS ~ quartz + gs + sf, data=rocks)
+anova(remove.plag.hb.ar, step.pick.backward)
+```
+
+Interesting!  Statistically speaking, we could remove `plag`, `hb` and `ar` and not lose any significant information.  But they are included in the backward selection model!
+
+#### Forward selection illustration
+
+```{r}
+null.fit <- lm(UCS ~ 1, data=rocks)
+step.pick.forward <- stats::step(null.fit, scope=formula(full.fit), direction="forward")
+summary(step.pick.forward)
+```
+
+We see that the forward selection algorithm chose a different model than backward selection! -- it includes `hb`, and uses `ga` instead of `gs`. The variable `hb` is marginally significant (note its $p$-value compared to the above: both are fairly close to 0.05, there is nothing magical about that number). AIC was used here, we could compare the $R^2_a$ and/or BIC values among these models
+
+```{r}
+glance(step.pick.backward) %>% 
+  dplyr::select(`Adj. R-squared`=adj.r.squared, AIC, BIC) %>%
+  kable()
+
+glance(remove.plag.hb.ar) %>% 
+  dplyr::select(`Adj. R-squared`=adj.r.squared, AIC, BIC) %>%
+  kable()
+
+glance(step.pick.forward) %>% 
+  dplyr::select(`Adj. R-squared`=adj.r.squared, AIC, BIC) %>%
+  kable()
+```
+
+By $R^2_a$, it appears the backward selection model is best, but via AIC or BIC it suggests the forward selection model or the model based on just `quartz`, `gs`, and `sf` (`remove.plag.hb.ar`) -- the BIC values are practically the same.
+
+## Other techniques
+
+In the next class we will cover another technique to help you, the practitioner, select a model, called **best subsets regression**.  
+
+As mentioned at the start of these notes, we are only scratching the surface of model selection in this class. Additional topics are discussed in the textbook and others can be found in other texts.
+
+
+# In-class Assignment
+
+
+
+### Model Building Activity: Used Car Prices
+
+This activity is designed to have you bring together many of the aspects of building and fitting a multiple regression model to a set of data. For this data set, a representative sample of over eight hundred 2005 General Motors (GM) cars were selected, then retail price was calculated from the tables provided in the 2005 Central Edition of the Kelly Blue Book. 
+
+The data file `kuiperCars.csv` contains the following variables:
+
+* `Price` - suggested retail price of the used 2005 GM car in excellent condition. *(The condition of a car can greatly affect price. All cars in this data set were less than one year old when priced and considered to be in excellent condition.)*
+* `Mileage` - number of miles the car has been driven
+* `Make` - manufacturer of the car such as Saturn, Pontiac, and Chevrolet
+* `Model` - specific models for each car manufacturer such as Ion, Vibe, Cavalier
+* `Trim` - specific type of car model such as SE Sedan 4D, Quad Coupe 2D
+* `Type` - body type such as sedan, coupe, etc.
+* `Cylinder` - number of cylinders in the engine
+* `Liter` - a more specific measure of engine size
+* `Doors` - number of doors
+* `Cruise` - 0/1 indicator variable representing whether the car has cruise control (1 = cruise)
+* `Sound` - 0/1 indicator variable representing whether the car has upgraded speakers (1 = upgraded)
+* `Leather` - 0/1 indicator variable representing whether the car has leather seats (1 = leather)
+
+
+The following code reads in the data:
+
+```{r}
+cars <- read.csv("kuiperCars.csv")
+glimpse(cars)
+```
+
+# Goals for this activity
+
+Our primary goals are to develop a good fitting model that can be used to effectively predict the selling price of a 2005 used GM car.  More specifically, we wish to develop a good model so that you can 
+
+1. Determine what variables are important predictors of the selling price of a car.
+2. Predict the price of a vehicle.
+
+
+Note: in this in class assignment, we provide template of code for you to fill in most of the parts. You need to remove the RMarkdown code chunk option "eval=F" after you fill in the information so that the code will be executed and outputs will be shown in the knitted file. 
+
+# Part 1 - Data Processing and EDA
+
+## Question 1
+
+Based on the context of the problem, and previews of the data, remove all variables from the dataset that will provide redundant information as the other variables.
+
+**Remove trim and make as they are completely colinear with other variables in the dataset**
+
+```{r}
+cars <- cars %>%
+  select(-c(Trim, Make))
+```
+
+## Question 2
+
+Based on the context of the data, mutate all variables that should be considered as categorical variables.
+
+**ANSWER HERE**
+
+
+
+```{r}
+# Cruise, leather, sound, doors, cylinder
+cars <- cars %>%
+  mutate(Cruise=as.factor(Cruise),
+         Leather=as.factor(Leather),
+         Sound=as.factor(Sound),
+         Doors=as.factor(Doors),
+         Cylinder=as.factor(Cylinder))
+```
+
+
+## Question 3
+
+Build a scatterplot matrix of the numeric and categorical predictor variables that only contain a few factor levels (that is, exclude, `Make`, `Model` and `Trim` variables from any plot). Discuss the findings and transform any variables you think would help in our analysis.
+
+```{r message=FALSE}
+ggpairs(cars, columns=c(2,4,5,6,7,8,9,10, 1))
+```
+
+**Looks pretty good! The price looks right-skewed based on the other variables. Not correlated with mileage. The better the engine the higher the price.**
+
+
+
+
+
+# Part 2 - Modeling
+
+## Question 4
+
+Fit a full main effects model to the `Price` of cars based on the following variables
+
+* `Mileage` - number of miles the car has been driven
+* `Model` - specific models for each car manufacturer such as Ion, Vibe, Cavalier
+* `Type` - body type such as sedan, coupe, etc.
+* `Cylinder` - number of cylinders in the engine
+* `Liter` - a more specific measure of engine size
+* `Doors` - number of doors
+* `Cruise` - indicator variable representing whether the car has cruise control (1 = cruise)
+* `Sound` - indicator variable representing whether the car has upgraded speakers (1 = upgraded)
+* `Leather` - indicator variable representing whether the car has leather seats (1 = leather)
+
+```{r}
+full.fit <- lm(Price ~ Mileage + Model + Type + Cylinder + Liter + Doors + Cruise + Sound + Leather, data=cars)
+```
+
+## Question 5
+
+Construct the residual diagnostic plots of the fitted model in question 4. Do any regression assumptions appear violated?
+
+```{r}
+autoplot(full.fit)
+```
+
+**The scale location seems to pointed towards the top as well as the normality assumption skews more positive further up.**
+
+## Question 6
+
+Build a Box-Cox plot for your model from Question 4, what transformation on the response is recommended?
+
+```{r}
+# Create box cox plot
+library(lindia)
+gg_boxcox(full.fit)
+```
+
+**Based on our box cox, we need to transform the price with a log.**
+
+## Question 7
+
+Re-fit the main effects model from question 4 where the response has been transformed with a logarithm. Assess the residuals in this fit.
+
+```{r}
+# Transform model
+full.log.fit <- lm(log(Price) ~ Mileage + Model + Type + Cylinder + Liter + Doors + Cruise + Sound + Leather, data=cars)
+autoplot(full.log.fit)
+```
+
+**It seems like that none of the assumptions seem to be violated. With the transformation, the assumptions look great.**
+
+
+## Question 8
+
+Does the model in question 7 significantly predict the logarithm of the price of vehicles? If so, how much of the variability in the logarithm of vehicle price is explained?
+
+```{r}
+# Produce summary
+summary(full.log.fit)
+```
+
+**97.92% of the variablity is explained by the model.**
+
+ 
+
+
+## Question 9
+
+Consider the `summary()` output for the model you fit in question 7 (you likely already included this output in question 8), you should note that one of the categorical predictor variables (likely `Doors` or `Type`) results in `NA` coefficients, standard errors, marginal $t$-statistics and $p$-values.  
+
+What do you suspect is happening in this model that would cause the computer to be unable to estimate that particular coefficient?
+
+*Hint:* Look at Question 1 in this assignment and consider what could be happening with some of the other categorical predictors.
+
+**Since the type of car and the doors are so correlated, it made it so insignificant.**
+
+
+
+
+
+
+# Part 3 - Model Selection
+
+## Question 10
+6
+Perform a backward stepwise regression on the model from question 7. What variables are included in that *final* model?
+
+```{r}
+ 
+step.pick.back <- stats::step(full.log.fit, direction="backward")
+```
+ 
+
+**Sounds, Leather, Cylinder, Liter, Type, Milage, and Model. This model has an AIC of 4508.29**
+
+
+
+## Question 11
+
+Perform a forward stepwise regression using all the predictor variables considered in the models from question 4 and question 7.
+
+```{r}
+null.fit <- lm(log(Price) ~ Mileage + Model + Type + Cylinder + Liter + Doors + Cruise + Sound + Leather, data=cars) 
+
+step.pick.forward <- stats::step(null.fit, scope=formula(full.log.fit), direction="forward")
+```
+
+**Mileage, Model, Type, Cylinder, Liter, Doors, Cruise, Sounds, and Leather. With an AICE of -4506.4**
+
+## Question 12
+
+Compare the AIC, BIC and adjusted R-squared of the stepwise regression model (or models) compared to the full main effects model from part 7.
+
+```{r}
+library(tidymodels)
+
+bind_rows(
+  glance(full.log.fit) %>% mutate(Model="Full main effects"),
+  glance(step.pick.back) %>% mutate(Model="Stepwise Regression") ) %>%
+  select(Model, Adj.R.Squared = adj.r.squared,
+         AIC, BIC) %>%
+  kable()
+```
+
+**Mileage, Model, Type, Cylinder, Liter, Doors, Cruise, Sounds, and Leather. With an AICE of -4506.4**
+
+## Question 13
+
+Use the *better* model from question 12 to predict the price, with 95% confidence, of a used 2005 Chevrolet Malibu 4-door sedan with 25000 miles, a 6-cylinder 3.5-liter engine, loaded with cruise control, upgraded speakers and leather seats.  
+
+```{r}
+new.car <- data.frame(Mileage= 25000, 
+                      Model="Malibu",
+                      Type="Sedan",
+                      Liter= 3.5,
+                      Cylinder="6",
+                      Sound= "1",
+                      Leather= "1")
+predict(step.pick.back, newdata=new.car, int="prediction")
+# This PI is on the log scale, remember!  So we exponentiate the endpoints to get back to dollars:
+exp(predict(step.pick.back, newdata=new.car, int="prediction"))
+```
+
+**The prediction says that it will have a price of $16,195.**
+
+
+## Question 14
+
+In addition, use best subsets selection to find the best model for predicting used car prices in terms of AIC. How does the best subsets model compare to the best model from question 12 in in-class assignment 18? 
+``` {r}
+fit.subs <- regsubsets(formula(step.pick.back), data=cars, nbest=1, nvmax=9)
+summary(fit.subs)
+subsets(fit.subs, statistic="bic", legend=FALSE)
+```
+
+``` {r}
+# New Model Fit
+fit.best2 <- lm(Price ~ Model + Liter + Mileage, data=cars)
+summary(fit.best2)
+AIC(fit.best2)
+AIC(step.pick.back)
+```
+
+**The AIC is much larger compared to the model that we had in question 12.**
+
+
